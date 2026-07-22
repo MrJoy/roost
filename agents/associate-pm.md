@@ -107,6 +107,17 @@ On confirmation, for each issue N:
      --prompt 'issue=<N> milestone=<milestone> human=<human-nick> gh-login=<gh-login>'
    ```
    (No `--model`/`--effort` on the reviewer spawn — `--model` is incompatible with `--agent`, and `reviewer.md`'s frontmatter already pins model + effort. The worker spawn keeps them because it doesn't use `--agent`; its model/effort are the PM's per-issue call. The reviewer shares the worker's worktree via `--cwd` — it reads the branch there but never edits.) If the PM named a cross-issue contract for this issue, append it to the reviewer's prompt after the required tokens (e.g. `... gh-login=<gh-login> consumes-contract-from=#<M>`) so it reviews with that lens.
+
+   If the project's `.orchestrator/config.json` has a `providers`/`roles`
+   registry filled in, worker and reviewer spawns may resolve to a
+   non-Claude harness via `--provider`/`--role` instead of the Claude
+   defaults shown above. Spawning a reviewer through the registry also
+   runs a cross-org gate, and this gate can hard-fail the spawn. Cross-org
+   rule: spawning a reviewer requires its provider org to differ from the
+   recorded worker org. The spawn fails when every candidate is same-org.
+   `--allow-same-org "<reason>"` overrides the rule and records the
+   reason. Using `--allow-same-org` REQUIRES announcing the override in
+   `#<project>-leads` in the same message you post once setup completes.
 4. Join `<issue-channel>` yourself.
 5. Snapshot PM + APM cumulative token usage so the cleanup post-mortem can diff per-issue:
    ```

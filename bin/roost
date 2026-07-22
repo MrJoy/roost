@@ -159,6 +159,27 @@ Options:
                              ids (claude-opus-4-5 etc.) pin the session to
                              that exact dated variant instead of tracking
                              the latest version at spawn time.
+  --harness NAME             Launch this harness directly: claude or codex.
+                             Skips registry resolution outright, same as
+                             --model. Codex is a stub in this release;
+                             spawning it fails fast and names the follow-up
+                             adapter work.
+  --provider NAME            Resolve harness + model from this provider
+                             entry in .orchestrator/config.json providers.
+                             Mutually exclusive with --role. See "Provider
+                             selection" below.
+  --role NAME                Resolve harness + model from this role's
+                             candidates in .orchestrator/config.json roles.
+                             Mutually exclusive with --provider. See
+                             "Provider selection" below.
+  --issue N                  Issue number for registry resolution and the
+                             cross-org gate. Defaults to the number parsed
+                             from the first #<project>-issue-<N> channel in
+                             --channels.
+  --allow-same-org "<reason>" Override the cross-org gate (see "Provider
+                             selection" below). Requires a reason string;
+                             the override is recorded in
+                             .orchestrator/provider-assignments.json.
   --perm-irc                 Run an in-process permbot inside the worker's
                              MCP server. It surfaces this worker's
                              tool-permission prompts as DMs to --perm-target.
@@ -209,14 +230,15 @@ Options:
                              Default: current directory. Pass a worktree
                              path so RVM/bundler/nvm resolve correctly
                              inside the login shell.
-  --no-signet                Skip signet-eval even when a .signet/
-                             directory exists in the spawn cwd. By default,
-                             a .signet/ directory auto-activates signet-eval:
-                             a deterministic, LLM-free policy gate wired
-                             ahead of the IRC permission relay on both
-                             PreToolUse and PermissionRequest. ALLOW/DENY
-                             from signet short-circuits; ASK or no match
-                             falls through to the existing relay unchanged.
+  --no-signet                A .signet/ directory in the spawn cwd
+                             auto-activates signet-eval, a deterministic
+                             policy gate that runs ahead of the usual
+                             permission handling. --no-signet skips it even
+                             when .signet/ is present. Wired ahead of the
+                             IRC permission relay on both PreToolUse and
+                             PermissionRequest. An ALLOW or DENY from
+                             signet short-circuits. ASK or no match falls
+                             through to the existing relay unchanged.
   -s, --session NAME         Override tmux session name. Default: roost-<nick>
   --agent NAME               Run this session as a named agent. Forwards
                              --agent to claude, which loads the matching
@@ -268,6 +290,21 @@ Agent class guidance:
 
   Unset is legal for ad-hoc/sandbox spawns where the cost shape isn't
   worth thinking about — claude-code's native cache behavior applies.
+
+Provider selection:
+  Provider resolution order: explicit --harness, --model, or --agent
+  always wins and skips the registry entirely. --provider resolves that
+  named provider directly. --role resolves through the roles map in
+  .orchestrator/config.json. No --provider and no --role means no
+  registry: today's behavior, claude harness with the opus default.
+
+  Cross-org rule: spawning a reviewer requires its provider org to differ
+  from the recorded worker org. The spawn fails when every candidate is
+  same-org. --allow-same-org "<reason>" overrides the rule and records
+  the reason.
+
+  Registry reads use jq. The jq check only fires when --provider or
+  --role is set. A bare spawn never needs jq on PATH.
 
 Examples:
   roost spawn worker-1 -c '#my-channel' --cwd ~/Dev/myproject
@@ -398,11 +435,11 @@ _init_config_json() {
     # Single-repo: project + repo + the static plugin slices (operator-set,
     # not DM-mutated). Dynamic slices (github-prs / github-issues) live in the
     # local overlay; their plugins.<name> key still enables them via union merge.
-    printf '{\n  "project": "%s",\n  "repo": "%s",\n  "agent_logins": %s,\n  "plugins": {\n    "github-new-issues": { "watched": [] },\n    "github-new-prs": { "watched": [] },\n    "github-commits": { "watched": [] }\n  }\n}\n' \
+    printf '{\n  "project": "%s",\n  "repo": "%s",\n  "agent_logins": %s,\n  "providers": {},\n  "roles": {},\n  "plugins": {\n    "github-new-issues": { "watched": [] },\n    "github-new-prs": { "watched": [] },\n    "github-commits": { "watched": [] }\n  }\n}\n' \
       "$1" "$2" "$3"
   else
     # Multi-repo: no top-level repo; operator adds plugin keys + per-entry repos.
-    printf '{\n  "project": "%s",\n  "agent_logins": %s,\n  "plugins": {}\n}\n' \
+    printf '{\n  "project": "%s",\n  "agent_logins": %s,\n  "providers": {},\n  "roles": {},\n  "plugins": {}\n}\n' \
       "$1" "$3"
   fi
 }

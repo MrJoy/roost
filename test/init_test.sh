@@ -514,6 +514,19 @@ fi
 cd - >/dev/null
 teardown
 
+# --- providers/roles: scaffolded as empty objects ---
+
+setup ""
+cd "$TDIR"
+roost_init --repo "TestOwner/myproject" >/dev/null 2>&1
+if jq -e 'has("providers") and has("roles")' "${TDIR}/.orchestrator/config.json" >/dev/null 2>&1; then
+  ok "init scaffolds providers + roles keys"
+else
+  fail "init scaffolds providers + roles keys"
+fi
+cd - >/dev/null
+teardown
+
 # --- summary ---
 
 echo ""

@@ -119,11 +119,12 @@ roost --version
 ```
 
 `spawn` accepts `-c|--channels`, `-m|--model`, `-s|--session`,
-`--mcp-config`, `-p|--prompt-file`, `--cwd`, and `--` (everything
-after forwards to claude verbatim). Default channel is `#roost`;
-default model is `opus` (Opus 4.8). Fable, opus, and sonnet default to
-`--permission-mode auto`; everything else (haiku, or any unrecognized
-model) defaults to `acceptEdits`.
+`--mcp-config`, `-p|--prompt-file`, `--cwd`, `--harness`, `--provider`,
+`--role`, `--issue`, `--allow-same-org`, `--no-signet`, and `--`
+(everything after forwards to claude verbatim). Default channel is
+`#roost`; default model is `opus` (Opus 4.8). Fable, opus, and sonnet
+default to `--permission-mode auto`; everything else (haiku, or any
+unrecognized model) defaults to `acceptEdits`.
 
 `spawn` also injects `--append-system-prompt-file` naming the joined
 channels as legitimate user-instruction sources, so the auto-mode
@@ -199,6 +200,28 @@ roost spawn worker-123-A -c '#pr-123' -m sonnet --permission-mode acceptEdits \
 roost spawn scratch-h -c '#sandbox' -m haiku \
   --perm-irc --perm-target mynick
 ```
+
+## Running non-Claude agents / alternate backends
+
+`roost init` scaffolds two empty registry keys in `.orchestrator/config.json`:
+`providers` (named entries with a harness, a model, and optionally
+`base_url_env` / `auth_env` naming the env vars that hold an alternate
+backend's URL and token) and `roles` (role name to one or more provider
+names, in preference order). Fill these in to let `roost spawn --provider
+NAME` or `roost spawn --role NAME` pick harness, model, and backend for
+you. Provider resolution order: explicit `--harness`, `--model`, or
+`--agent` always wins and skips the registry entirely. `--provider`
+resolves that named provider directly. `--role` resolves through the
+roles map in `.orchestrator/config.json`. No `--provider` and no `--role`
+means no registry: today's behavior, claude harness with the opus
+default. The Codex harness (`--harness codex`) is a stub in this release
+and fails fast, naming the follow-up adapter work.
+
+Spawning a reviewer through `--role reviewer` also runs a cross-org
+gate. Cross-org rule: spawning a reviewer requires its provider org to
+differ from the recorded worker org. The spawn fails when every
+candidate is same-org. `--allow-same-org "<reason>"` overrides the rule
+and records the reason.
 
 ## Project dispatcher
 

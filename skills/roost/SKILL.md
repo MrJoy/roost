@@ -35,7 +35,9 @@ roost spawn <nick> [-c CHANS] [-m MODEL] [--agent NAME] [-s SESSION] [--mcp-conf
                    [--steer-compact] \
                    [--perm-irc --perm-target NICK] \
                    [--ask-irc CHANNEL --ask-target NICK] \
-                   [--no-signet]
+                   [--no-signet] \
+                   [--harness claude|codex] [--provider NAME | --role NAME] \
+                   [--issue N] [--allow-same-org "<reason>"]
 roost agents [--all]
 roost shutdown <nick>
 roost list
@@ -68,10 +70,9 @@ Defaults:
   with a directive (so the compactor runs with `custom_instructions`
   rather than its empty default). See `roost spawn --help`
   ("Agent class guidance") for which agents need this.
-- signet-eval: auto-activates when a `.signet/` directory exists in the
-  spawn cwd. A fast, deterministic policy check that runs ahead of the
-  usual permission handling; pass `--no-signet` to skip it even when
-  `.signet/` is present.
+- A `.signet/` directory in the spawn cwd auto-activates signet-eval, a
+  deterministic policy gate that runs ahead of the usual permission
+  handling. `--no-signet` skips it even when `.signet/` is present.
 
 The wrapper handles the `ROOST_IRC_*` env vars, the
 `--dangerously-load-development-channels server:plugin:roost:roost-irc` flag, the
@@ -95,6 +96,34 @@ lists the `NAME`s available:
 - **`roost agents --all`** — also everything roost ships, flagging what isn't
   installed here yet and how to install it (`roost init --force-agents`). Use
   this to find a newly shipped agent.
+
+## Multi-provider (--harness, --provider, --role)
+
+`roost init` scaffolds two empty keys in `.orchestrator/config.json`:
+`providers` (named provider entries: harness, model, and optionally
+`base_url_env` / `auth_env` for an alternate backend) and `roles` (role
+name to one or more provider names, in preference order). An operator
+fills these in by hand. An empty registry is not an error. `roost spawn`
+without `--provider` or `--role` works exactly as it does today.
+
+`--provider NAME` picks one named provider directly. `--role NAME` picks
+from that role's candidates. The two flags are mutually exclusive.
+
+Provider resolution order: explicit `--harness`, `--model`, or `--agent`
+always wins and skips the registry entirely. `--provider` resolves that
+named provider directly. `--role` resolves through the roles map in
+`.orchestrator/config.json`. No `--provider` and no `--role` means no
+registry: today's behavior, claude harness with the opus default.
+
+Cross-org rule: spawning a reviewer requires its provider org to differ
+from the recorded worker org. The spawn fails when every candidate is
+same-org. `--allow-same-org "<reason>"` overrides the rule and records
+the reason. Any `--allow-same-org` override must be announced in
+`#<project>-leads`.
+
+The Codex harness is a stub in this release. Spawning `--harness codex`
+(directly or via the registry) fails fast and names the follow-up
+adapter work.
 
 ## IRC permission oversight (--perm-irc)
 
