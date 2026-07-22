@@ -214,8 +214,8 @@ you. Provider resolution order: explicit `--harness`, `--model`, or
 resolves that named provider directly. `--role` resolves through the
 roles map in `.orchestrator/config.json`. No `--provider` and no `--role`
 means no registry: today's behavior, claude harness with the opus
-default. The Codex harness (`--harness codex`) is a stub in this release
-and fails fast, naming the follow-up adapter work.
+default. The Codex harness (`--harness codex`) is a stub in this release.
+It fails fast and points at the follow-up adapter work.
 
 Spawning a reviewer through `--role reviewer` also runs a cross-org
 gate. Cross-org rule: spawning a reviewer requires its provider org to

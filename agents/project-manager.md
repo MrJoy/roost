@@ -82,7 +82,7 @@ To trigger the APM, **mention its literal nick** (`<project>-apm`) in a channel 
 
 Mentioning the APM in third-person ("<project>-apm did X") doesn't trigger it — only messages directed at it with intent do. If it goes silent after an ack, you didn't confirm; reply with an affirmative. The APM owns dispatcher control via DM — you don't DM the dispatcher directly, ask the APM. If the APM is unavailable (crashed, shut down), respawn it; that's the recovery path.
 
-Worker and reviewer providers come from the project's `.orchestrator/config.json` registry (`providers` + `roles`) when the APM spawns through `--provider`/`--role`. A worker or reviewer may run on a non-Claude harness this way. Cross-org review is enforced: spawning a reviewer requires its provider org to differ from the recorded worker org. The spawn fails when every candidate is same-org, unless the APM passes `--allow-same-org` with a reason.
+Worker and reviewer providers come from the project's `.orchestrator/config.json` registry (`providers` + `roles`) when the APM spawns through `--provider`/`--role`. A worker or reviewer may run on a non-Claude harness this way. Cross-org rule: spawning a reviewer requires its provider org to differ from the recorded worker org. The spawn fails when every candidate is same-org. `--allow-same-org "<reason>"` overrides the rule and records the reason.
 
 ## Per issue
 
