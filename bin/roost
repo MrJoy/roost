@@ -651,6 +651,16 @@ require_ircd() {
   fi
 }
 
+# Registry resolution (--role / --provider / .orchestrator providers) reads
+# .orchestrator/config.json with jq. Only called from the registry-resolution
+# branch below, never unconditionally, so a bare spawn never needs jq on PATH.
+require_jq() {
+  command -v jq >/dev/null 2>&1 && return 0
+  echo "error: roost registry resolution (--role / --provider / .orchestrator providers) requires jq, which was not found on PATH." >&2
+  echo "       Install jq (brew install jq) or spawn with explicit --harness/--model instead." >&2
+  return 1
+}
+
 # All per-session files live under a mktemp-generated directory created at
 # spawn time (ROOST_DATA_DIR). The dir is stored in the tmux session env so
 # shutdown can find it:
@@ -664,6 +674,9 @@ cmd_spawn() {
   local model=""
   local model_explicit=0
   local harness="claude"
+  local harness_explicit=0
+  local provider=""
+  local role=""
   local session_name=""
   local agent=""
   local mcp_config=""
@@ -691,7 +704,9 @@ cmd_spawn() {
     case "$1" in
       -c|--channels)    channels="$2"; shift 2 ;;
       -m|--model)       model="$2"; model_explicit=1; shift 2 ;;
-      --harness)        harness="$2"; shift 2 ;;
+      --harness)        harness="$2"; harness_explicit=1; shift 2 ;;
+      --provider)       provider="$2"; shift 2 ;;
+      --role)           role="$2"; shift 2 ;;
       -s|--session)     session_name="$2"; shift 2 ;;
       --agent)          agent="$2"; shift 2 ;;
       --mcp-config)     mcp_config="$2"; shift 2 ;;
@@ -721,9 +736,39 @@ cmd_spawn() {
     claude|codex) ;;
     *) echo "error: unknown harness '${harness}'. Must be one of: claude, codex" >&2; return 1 ;;
   esac
+  if [ -n "${provider}" ] && [ -n "${role}" ]; then
+    echo "error: --provider and --role are mutually exclusive" >&2
+    return 1
+  fi
   if [ "${model_explicit}" -eq 1 ] && [ -n "${agent}" ]; then
     echo "error: --model and --agent are mutually exclusive — the agent's frontmatter wins on model, so --model would be silently ignored" >&2
     exit 1
+  fi
+  # Registry resolution only runs when --provider/--role select it, and only
+  # when no explicit --harness/--model already pinned the launch target (those
+  # win outright and skip the registry read entirely). require_jq is called
+  # here, not unconditionally, so a bare spawn never needs jq on PATH.
+  if [ "${model_explicit}" -eq 0 ] && [ "${harness_explicit}" -eq 0 ] && [ -z "${agent}" ] \
+      && { [ -n "${provider}" ] || [ -n "${role}" ]; }; then
+    require_jq || return 1
+    # shellcheck source=bin/roost-registry.sh
+    source "$(dirname "${ROOST_BIN}")/roost-registry.sh"
+    # registry_* functions resolve .orchestrator/config.json relative to the
+    # process's cwd, so hop into the spawn target (--cwd) to resolve, then
+    # hop back immediately so the rest of spawn is unaffected.
+    local _registry_prev_pwd _registry_rc
+    _registry_prev_pwd="$(pwd)"
+    cd "${cwd}" || return 1
+    if [ -n "${provider}" ]; then
+      registry_provider_fields "${provider}"; _registry_rc=$?
+    else
+      registry_resolve_role "${role}"; _registry_rc=$?
+    fi
+    cd "${_registry_prev_pwd}" || return 1
+    [ "${_registry_rc}" -eq 0 ] || return 1
+    harness="${RESOLVED_HARNESS}"
+    model="${RESOLVED_MODEL}"
+    # base_url_env / auth_env / org are consumed by later provider-wiring work.
   fi
   if [ -z "${model}" ] && [ -z "${agent}" ]; then
     model="opus"
