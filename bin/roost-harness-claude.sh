@@ -183,15 +183,6 @@ harness_assemble() {
     local _tok_val="${!REQ_AUTH_ENV:-}"
     [ -n "${_tok_val}" ] && RESP_TMUX_ENV+=(-e "ANTHROPIC_AUTH_TOKEN=${_tok_val}")
   fi
-  # Test seam: stage the tmux env additions for spawn tests. Written
-  # unconditionally (most spawns configure no backend env), so guard the
-  # empty-array case: "${arr[@]}" on an empty/unset array is unbound under
-  # set -u on bash 3.2 (the bash macOS ships).
-  if [ "${#RESP_TMUX_ENV[@]}" -gt 0 ]; then
-    printf '%s\n' "${RESP_TMUX_ENV[@]}" > "${REQ_DATA_DIR}/tmux-env.txt"
-  else
-    : > "${REQ_DATA_DIR}/tmux-env.txt"
-  fi
   # Same test seam as the data-dir preflight echo in the spawn wrapper: surface
   # the assembled inner command so the spawn_test.sh shell-flavor regressions
   # can grep for the prompt-read syntax that matches the resolved shell. Stage
@@ -200,5 +191,16 @@ harness_assemble() {
   if [ "${ROOST_SPAWN_KEEP_DATA_DIR:-0}" = "1" ]; then
     echo "  inner cmd (preflight): ${RESP_INNER_CMD}"
     printf '%s' "${RESP_INNER_CMD}" > "${REQ_DATA_DIR}/inner-cmd.txt"
+    # Test seam: stage the tmux env additions for spawn tests. This can
+    # include a raw ANTHROPIC_AUTH_TOKEN value when a provider configures
+    # auth_env, so it is gated on the same test-only flag as inner-cmd.txt
+    # above and never written during a real operator spawn. Guard the
+    # empty-array case: "${arr[@]}" on an empty/unset array is unbound under
+    # set -u on bash 3.2 (the bash macOS ships).
+    if [ "${#RESP_TMUX_ENV[@]}" -gt 0 ]; then
+      printf '%s\n' "${RESP_TMUX_ENV[@]}" > "${REQ_DATA_DIR}/tmux-env.txt"
+    else
+      : > "${REQ_DATA_DIR}/tmux-env.txt"
+    fi
   fi
 }
