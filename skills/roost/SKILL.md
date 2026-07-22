@@ -34,7 +34,8 @@ roost spawn <nick> [-c CHANS] [-m MODEL] [--agent NAME] [-s SESSION] [--mcp-conf
                    [--permission-mode MODE] [--cache-ttl 5m|1h] \
                    [--steer-compact] \
                    [--perm-irc --perm-target NICK] \
-                   [--ask-irc CHANNEL --ask-target NICK]
+                   [--ask-irc CHANNEL --ask-target NICK] \
+                   [--no-signet]
 roost agents [--all]
 roost shutdown <nick>
 roost list
@@ -67,6 +68,10 @@ Defaults:
   with a directive (so the compactor runs with `custom_instructions`
   rather than its empty default). See `roost spawn --help`
   ("Agent class guidance") for which agents need this.
+- signet-eval: auto-activates when a `.signet/` directory exists in the
+  spawn cwd. A fast, deterministic policy check that runs ahead of the
+  usual permission handling; pass `--no-signet` to skip it even when
+  `.signet/` is present.
 
 The wrapper handles the `ROOST_IRC_*` env vars, the
 `--dangerously-load-development-channels server:plugin:roost:roost-irc` flag, the

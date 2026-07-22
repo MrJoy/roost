@@ -209,6 +209,14 @@ Options:
                              Default: current directory. Pass a worktree
                              path so RVM/bundler/nvm resolve correctly
                              inside the login shell.
+  --no-signet                Skip signet-eval even when a .signet/
+                             directory exists in the spawn cwd. By default,
+                             a .signet/ directory auto-activates signet-eval:
+                             a deterministic, LLM-free policy gate wired
+                             ahead of the IRC permission relay on both
+                             PreToolUse and PermissionRequest. ALLOW/DENY
+                             from signet short-circuits; ASK or no match
+                             falls through to the existing relay unchanged.
   -s, --session NAME         Override tmux session name. Default: roost-<nick>
   --agent NAME               Run this session as a named agent. Forwards
                              --agent to claude, which loads the matching
@@ -694,6 +702,7 @@ cmd_spawn() {
   local steer_compact=0
   local allow_same_org=0
   local allow_same_org_reason=""
+  local no_signet=0
   local extra_args=()
 
   if [ "$#" -lt 1 ]; then
@@ -726,6 +735,7 @@ cmd_spawn() {
       --cache-ttl)      cache_ttl="$2"; shift 2 ;;
       --steer-compact)  steer_compact=1; shift ;;
       --allow-same-org) allow_same_org=1; allow_same_org_reason="$2"; shift 2 ;;
+      --no-signet)      no_signet=1; shift ;;
 
       --)               shift; extra_args=("$@"); break ;;
       *)
@@ -737,6 +747,14 @@ cmd_spawn() {
     esac
   done
   [ -z "${session_name}" ] && session_name="${SESSION_PREFIX}${nick}"
+  # signet-eval: a deterministic, LLM-free policy gate layered ahead of the
+  # IRC permission relay. Auto-activates when a .signet/ directory exists in
+  # the spawn cwd; --no-signet opts out even when .signet/ is present.
+  local signet_active=0
+  if [ "${no_signet}" -eq 0 ] && [ -d "${cwd:-.}/.signet" ]; then
+    signet_active=1
+    echo "  signet-eval policy active (.signet/ found)"
+  fi
   case "${harness}" in
     claude|codex) ;;
     *) echo "error: unknown harness '${harness}'. Must be one of: claude, codex" >&2; return 1 ;;
@@ -1012,6 +1030,7 @@ cmd_spawn() {
   REQ_STEER_COMPACT="${steer_compact}"
   REQ_BASE_URL_ENV="${RESOLVED_BASE_URL_ENV:-}"
   REQ_AUTH_ENV="${RESOLVED_AUTH_ENV:-}"
+  REQ_SIGNET_ACTIVE="${signet_active}"
   harness_assemble || return 1
   # Test seam: ROOST_SPAWN_KEEP_DATA_DIR=1 echoes the data-dir path early and
   # suppresses the failure-cleanup trap, so spawn_test.sh can read the files

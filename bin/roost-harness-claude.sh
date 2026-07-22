@@ -26,8 +26,32 @@ harness_assemble() {
   if [ "${REQ_STEER_COMPACT}" -eq 1 ]; then
     precompact_hook_json="\"PreCompact\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"${REQ_ROOST_BIN} hook-exec roost-compact-hook\"}]}],"
   fi
+  # signet-eval decides first (deterministic, LLM-free policy gate). ALLOW/DENY
+  # short-circuit; ASK or no matching rule falls through to the existing
+  # irc-permission-prompt relay below, which is left exactly as-is.
+  local signet_perm_json=""
+  if [ "${REQ_SIGNET_ACTIVE}" -eq 1 ]; then
+    signet_perm_json="{\"matcher\":\"\",\"hooks\":[{\"type\":\"command\",\"command\":\"signet-eval --permissionrequest\"}]}"
+  fi
+  local irc_perm_json=""
   if [ "${REQ_PERM_IRC}" -eq 1 ]; then
-    perm_hook_json=",\"PermissionRequest\":[{\"matcher\":\"\",\"hooks\":[{\"type\":\"command\",\"command\":\"${REQ_ROOST_BIN} hook-exec irc-permission-prompt\"}]}]"
+    irc_perm_json="{\"matcher\":\"\",\"hooks\":[{\"type\":\"command\",\"command\":\"${REQ_ROOST_BIN} hook-exec irc-permission-prompt\"}]}"
+  fi
+  # Compose PermissionRequest from the non-empty pieces, signet first, joined
+  # by commas. Emitted only when at least one piece exists, so the no-signet +
+  # no-perm-irc case adds nothing to the settings JSON (byte-identical to
+  # today), and the no-signet + --perm-irc case reproduces today's exact
+  # single-entry string.
+  local permissionrequest_array="${signet_perm_json}"
+  if [ -n "${irc_perm_json}" ]; then
+    if [ -n "${permissionrequest_array}" ]; then
+      permissionrequest_array="${permissionrequest_array},${irc_perm_json}"
+    else
+      permissionrequest_array="${irc_perm_json}"
+    fi
+  fi
+  if [ -n "${permissionrequest_array}" ]; then
+    perm_hook_json=",\"PermissionRequest\":[${permissionrequest_array}]"
   fi
   # PreToolUse may hold up to two matcher entries: Bash (when --perm-irc, so
   # the safety-analyzer can't bypass the operator's review) and
@@ -49,6 +73,12 @@ harness_assemble() {
   case "${REQ_HOOK_PERM_MODE}" in
     auto|bypassPermissions) _skip_bash_hook=1 ;;
   esac
+  # signet-eval decides first (deterministic). ALLOW/DENY short-circuit; ASK or
+  # no-matching-rule falls through to the existing classifyBash + IRC relay,
+  # which is left exactly as-is.
+  if [ "${REQ_SIGNET_ACTIVE}" -eq 1 ]; then
+    pretooluse_entries+=("{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"signet-eval --pretooluse\"}]}")
+  fi
   if [ "${REQ_PERM_IRC}" -eq 1 ] && [ "${_skip_bash_hook}" -eq 0 ]; then
     pretooluse_entries+=("{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"${REQ_ROOST_BIN} hook-exec irc-pretooluse-prompt\"}]}")
   elif [ "${REQ_PERM_IRC}" -eq 1 ] && [ "${_skip_bash_hook}" -eq 1 ]; then
