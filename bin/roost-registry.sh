@@ -62,3 +62,28 @@ registry_resolve_role() {
   [ -n "$first" ] || { echo "error: role '${role}' has an empty candidate set" >&2; return 1; }
   registry_provider_fields "$first"
 }
+
+# Path to the per-issue provider assignment state, relative to the spawn cwd.
+_assignment_path() { echo ".orchestrator/provider-assignments.json"; }
+
+# assignment_record <issue> <role> <provider> <org> [override] [reason]
+# Atomic read-modify-write: writes to a tempfile then renames into place, so
+# a concurrent reader never sees a half-written file.
+assignment_record() {
+  local issue="$1" role="$2" provider="$3" org="$4" override="${5:-false}" reason="${6:-}"
+  local f; f="$(_assignment_path)"
+  mkdir -p "$(dirname "$f")"
+  [ -f "$f" ] || printf '{}' > "$f"
+  local tmp; tmp="$(mktemp "${f}.XXXXXX")"
+  jq --arg i "$issue" --arg role "$role" --arg p "$provider" --arg o "$org" \
+     --argjson ov "$override" --arg reason "$reason" \
+     '.[$i] = {provider:$p, org:$o, role:$role, override:$ov, reason:$reason}' \
+     "$f" > "$tmp" && mv "$tmp" "$f"
+}
+
+# assignment_lookup <issue> -> echoes the recorded org, or empty if none.
+assignment_lookup() {
+  local issue="$1" f; f="$(_assignment_path)"
+  [ -f "$f" ] || return 0
+  jq -r --arg i "$issue" '.[$i].org // empty' "$f"
+}

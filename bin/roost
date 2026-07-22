@@ -408,7 +408,7 @@ _init_config_local_json() {
 }
 
 _init_gitignore() {
-  printf 'config.local.json\nstate.json\nlast-tick.txt\nlast-error.txt\ndispatcher.pid\njoined-channels.txt\ndispatcher-boot.log\ndaemon.log\n.dispatcher.start.lock\ntoken-snapshots.json\n.token-snapshots.*.tmp\n'
+  printf 'config.local.json\nstate.json\nlast-tick.txt\nlast-error.txt\ndispatcher.pid\njoined-channels.txt\ndispatcher-boot.log\ndaemon.log\n.dispatcher.start.lock\ntoken-snapshots.json\n.token-snapshots.*.tmp\nprovider-assignments.json\n'
 }
 
 cmd_init() {
@@ -677,6 +677,7 @@ cmd_spawn() {
   local harness_explicit=0
   local provider=""
   local role=""
+  local issue=""
   local session_name=""
   local agent=""
   local mcp_config=""
@@ -707,6 +708,7 @@ cmd_spawn() {
       --harness)        harness="$2"; harness_explicit=1; shift 2 ;;
       --provider)       provider="$2"; shift 2 ;;
       --role)           role="$2"; shift 2 ;;
+      --issue)          issue="$2"; shift 2 ;;
       -s|--session)     session_name="$2"; shift 2 ;;
       --agent)          agent="$2"; shift 2 ;;
       --mcp-config)     mcp_config="$2"; shift 2 ;;
@@ -763,6 +765,22 @@ cmd_spawn() {
       registry_provider_fields "${provider}"; _registry_rc=$?
     else
       registry_resolve_role "${role}"; _registry_rc=$?
+    fi
+    # Record the resolved author-org into per-issue assignment state, for
+    # worker spawns only. Must run here, before hopping back out of --cwd:
+    # assignment_record writes a cwd-relative path, so it has to land in the
+    # spawn target's .orchestrator/, not the process's real cwd.
+    if [ "${_registry_rc}" -eq 0 ] && [ "${role}" = "worker" ]; then
+      # Derive issue key: explicit --issue wins, else parse the first
+      # #<project>-issue-<N> channel out of --channels.
+      local issue_key="${issue}"
+      if [ -z "${issue_key}" ]; then
+        issue_key="$(printf '%s' "${channels}" | grep -oE '#[a-zA-Z0-9_-]+-issue-[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)"
+      fi
+      if [ -n "${issue_key}" ]; then
+        assignment_record "${issue_key}" "worker" "${RESOLVED_PROVIDER_NAME}" "${RESOLVED_ORG}"
+        echo "  recorded author-org '${RESOLVED_ORG}' for issue ${issue_key} (provider ${RESOLVED_PROVIDER_NAME})"
+      fi
     fi
     cd "${_registry_prev_pwd}" || return 1
     [ "${_registry_rc}" -eq 0 ] || return 1
