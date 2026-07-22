@@ -66,3 +66,18 @@ jobs:
 
       - name: Shell tests — version
         run: bash test/version_test.sh
+
+      - name: Shell tests — harness
+        run: bash test/harness_test.sh
+
+      - name: Shell tests — registry
+        run: bash test/registry_test.sh
+
+      - name: Shell tests — cross-org
+        run: bash test/cross-org_test.sh
+
+      - name: Shell tests — signet
+        run: bash test/signet_test.sh
+
+      - name: Shell tests — init
+        run: bash test/init_test.sh
