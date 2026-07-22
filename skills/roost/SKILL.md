@@ -72,7 +72,9 @@ Defaults:
   ("Agent class guidance") for which agents need this.
 - A `.signet/` directory in the spawn cwd auto-activates signet-eval, a
   deterministic policy gate that runs ahead of the usual permission
-  handling. `--no-signet` skips it even when `.signet/` is present.
+  handling. `--no-signet` skips it even when `.signet/` is present. If
+  `.signet/` is present and signet-eval is not on PATH, spawn errors out
+  instead of starting ungated. Install signet-eval, or pass `--no-signet`.
 
 The wrapper handles the `ROOST_IRC_*` env vars, the
 `--dangerously-load-development-channels server:plugin:roost:roost-irc` flag, the

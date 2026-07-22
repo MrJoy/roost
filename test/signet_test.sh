@@ -25,10 +25,27 @@ teardown() {
   TDIR=""
 }
 
+# signet-eval is not expected to be installed in the test/CI environment (that's
+# the whole point of the fail-closed guard), but the activation cases below
+# need it on PATH to exercise the wired-hook path. Stub it: an executable that
+# just exits 0 is sufficient since these tests only check hook JSON wiring and
+# the banner, never actually invoking signet-eval.
+STUBS=""
+stub_signet_eval() {
+  STUBS="${TDIR}/.stubs"
+  mkdir -p "$STUBS"
+  cat > "${STUBS}/signet-eval" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "${STUBS}/signet-eval"
+}
+
 # -- Test: .signet/ present → banner announces activation + hook wired ahead of relay --
 setup
 mkdir -p "$TDIR/.signet"
-out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 "${ROOST_BIN}" spawn testnick --perm-irc --perm-target op --permission-mode acceptEdits --cwd "$TDIR" 2>&1 || true)"
+stub_signet_eval
+out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 PATH="${STUBS}:${PATH}" "${ROOST_BIN}" spawn testnick --perm-irc --perm-target op --permission-mode acceptEdits --cwd "$TDIR" 2>&1 || true)"
 data_dir="$(echo "$out" | sed -n 's/.*data dir (preflight): //p' | head -1)"
 if echo "$out" | grep -qF "signet-eval policy active (.signet/ found)" \
     && grep -qF 'signet-eval' "$data_dir/roost-settings.json" 2>/dev/null; then
@@ -41,7 +58,8 @@ fi
 # -- Test: signet entry precedes the irc relay entry in PreToolUse --
 setup
 mkdir -p "$TDIR/.signet"
-out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 "${ROOST_BIN}" spawn testnick --perm-irc --perm-target op --permission-mode acceptEdits --cwd "$TDIR" 2>&1 || true)"
+stub_signet_eval
+out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 PATH="${STUBS}:${PATH}" "${ROOST_BIN}" spawn testnick --perm-irc --perm-target op --permission-mode acceptEdits --cwd "$TDIR" 2>&1 || true)"
 data_dir="$(echo "$out" | sed -n 's/.*data dir (preflight): //p' | head -1)"
 settings="$(cat "$data_dir/roost-settings.json" 2>/dev/null)"
 # signet's byte offset in the Bash matcher entry must be before irc-pretooluse-prompt's.
@@ -77,6 +95,27 @@ else
   fail "no .signet/: no signet wiring" "settings=$(cat "$data_dir/roost-settings.json" 2>/dev/null)"
 fi
 [ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
+
+# -- Test: .signet/ present + signet-eval NOT on PATH → fail closed and loud --
+setup
+mkdir -p "$TDIR/.signet"
+# Neutralize PATH so signet-eval is absent even if the ambient environment
+# happens to have it installed: strip out any PATH entry that resolves
+# signet-eval, but keep everything else so bash and core utilities still work.
+neutralized_path=""
+IFS=':' read -ra _path_dirs <<< "$PATH"
+for _dir in "${_path_dirs[@]}"; do
+  [ -x "${_dir}/signet-eval" ] && continue
+  neutralized_path="${neutralized_path:+${neutralized_path}:}${_dir}"
+done
+err_out="$(PATH="${neutralized_path}" "${ROOST_BIN}" spawn testnick --cwd "$TDIR" 2>&1)"
+rc=$?
+if [ "$rc" -ne 0 ] && echo "$err_out" | grep -qF "signet-eval is not on PATH"; then
+  ok ".signet present + signet-eval missing: fails closed with clear error"
+else
+  fail ".signet present + signet-eval missing: fails closed with clear error" "rc=$rc out=$err_out"
+fi
+teardown
 
 echo ""
 echo "Results: ${PASS} passed, ${FAIL} failed"

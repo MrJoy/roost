@@ -790,9 +790,15 @@ cmd_spawn() {
   fi
   # signet-eval: a deterministic, LLM-free policy gate layered ahead of the
   # IRC permission relay. Auto-activates when a .signet/ directory exists in
-  # the spawn cwd; --no-signet opts out even when .signet/ is present.
+  # the spawn cwd; --no-signet opts out even when .signet/ is present. If it
+  # would activate but the signet-eval binary is not on PATH, fail closed and
+  # loud here rather than silently wiring a hook that fails at tool-call time.
   local signet_active=0
   if [ "${no_signet}" -eq 0 ] && [ -d "${cwd:-.}/.signet" ]; then
+    if ! command -v signet-eval &>/dev/null; then
+      echo "error: .signet/ found but signet-eval is not on PATH. Install signet-eval or pass --no-signet." >&2
+      exit 1
+    fi
     signet_active=1
     echo "  signet-eval policy active (.signet/ found)"
   fi
