@@ -692,6 +692,8 @@ cmd_spawn() {
   local permission_mode=""
   local cache_ttl=""
   local steer_compact=0
+  local allow_same_org=0
+  local allow_same_org_reason=""
   local extra_args=()
 
   if [ "$#" -lt 1 ]; then
@@ -723,6 +725,7 @@ cmd_spawn() {
       --permission-mode) permission_mode="$2"; shift 2 ;;
       --cache-ttl)      cache_ttl="$2"; shift 2 ;;
       --steer-compact)  steer_compact=1; shift ;;
+      --allow-same-org) allow_same_org=1; allow_same_org_reason="$2"; shift 2 ;;
 
       --)               shift; extra_args=("$@"); break ;;
       *)
@@ -761,8 +764,19 @@ cmd_spawn() {
     local _registry_prev_pwd _registry_rc
     _registry_prev_pwd="$(pwd)"
     cd "${cwd}" || return 1
+    # Derive issue key: explicit --issue wins, else parse the first
+    # #<project>-issue-<N> channel out of --channels. Derived before
+    # resolution (not just for worker recording) because the reviewer
+    # cross-org gate needs it to look up the recorded author-org.
+    local issue_key="${issue}"
+    if [ -z "${issue_key}" ]; then
+      issue_key="$(printf '%s' "${channels}" | grep -oE '#[a-zA-Z0-9_-]+-issue-[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)"
+    fi
     if [ -n "${provider}" ]; then
       registry_provider_fields "${provider}"; _registry_rc=$?
+    elif [ "${role}" = "reviewer" ]; then
+      policy_gate_reviewer "${issue_key}" "reviewer" "${allow_same_org}" "${allow_same_org_reason}"
+      _registry_rc=$?
     else
       registry_resolve_role "${role}"; _registry_rc=$?
     fi
@@ -771,12 +785,6 @@ cmd_spawn() {
     # assignment_record writes a cwd-relative path, so it has to land in the
     # spawn target's .orchestrator/, not the process's real cwd.
     if [ "${_registry_rc}" -eq 0 ] && [ "${role}" = "worker" ]; then
-      # Derive issue key: explicit --issue wins, else parse the first
-      # #<project>-issue-<N> channel out of --channels.
-      local issue_key="${issue}"
-      if [ -z "${issue_key}" ]; then
-        issue_key="$(printf '%s' "${channels}" | grep -oE '#[a-zA-Z0-9_-]+-issue-[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)"
-      fi
       if [ -n "${issue_key}" ]; then
         assignment_record "${issue_key}" "worker" "${RESOLVED_PROVIDER_NAME}" "${RESOLVED_ORG}"
         echo "  recorded author-org '${RESOLVED_ORG}' for issue ${issue_key} (provider ${RESOLVED_PROVIDER_NAME})"

@@ -87,3 +87,43 @@ assignment_lookup() {
   [ -f "$f" ] || return 0
   jq -r --arg i "$issue" '.[$i].org // empty' "$f"
 }
+
+# policy_gate_reviewer <issue> <role> <allow_same_org:0|1> <reason>
+# Walks the role's candidate set, picks the first provider whose lineage org
+# differs from the recorded author-org. Sets RESOLVED_* on success.
+# Return codes: 0 ok; 2 no recorded author; 3 all same-org (no override).
+policy_gate_reviewer() {
+  local issue="$1" role="$2" allow="$3" reason="$4"
+  local author_org; author_org="$(assignment_lookup "$issue")"
+  if [ -z "$author_org" ]; then
+    echo "error: no recorded author for issue ${issue}. Spawn the worker first" >&2
+    return 2
+  fi
+  local candidates; candidates="$(registry_role_candidates "$role")" || return 1
+  local top="" chosen=""
+  while IFS= read -r cand; do
+    [ -n "$cand" ] || continue
+    [ -z "$top" ] && top="$cand"
+    registry_provider_fields "$cand" || return 1
+    if [ "$RESOLVED_ORG" != "$author_org" ]; then
+      chosen="$cand"; break
+    fi
+  done <<< "$candidates"
+  if [ -n "$chosen" ]; then
+    if [ "$chosen" != "$top" ]; then
+      echo "  cross-org gate: chose '${chosen}' over top candidate '${top}' (author org '${author_org}')"
+    fi
+    # RESOLVED_* already set to the chosen provider by the loop's last fields call.
+    registry_provider_fields "$chosen"
+    return 0
+  fi
+  # No cross-org candidate.
+  if [ "$allow" = "1" ]; then
+    registry_provider_fields "$top" || return 1
+    echo "  WARNING: cross-org gate OVERRIDE. Reviewer '${top}' is same org ('${author_org}') as the author. Reason: ${reason}" >&2
+    assignment_record "$issue" "reviewer-override" "$top" "$RESOLVED_ORG" true "$reason"
+    return 0
+  fi
+  echo "error: cross-org review rule. Every reviewer candidate for issue ${issue} is same org ('${author_org}') as the author. Pass --allow-same-org \"<reason>\" to override." >&2
+  return 3
+}
