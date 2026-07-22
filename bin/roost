@@ -663,6 +663,7 @@ cmd_spawn() {
   local channels="#roost"
   local model=""
   local model_explicit=0
+  local harness="claude"
   local session_name=""
   local agent=""
   local mcp_config=""
@@ -690,6 +691,7 @@ cmd_spawn() {
     case "$1" in
       -c|--channels)    channels="$2"; shift 2 ;;
       -m|--model)       model="$2"; model_explicit=1; shift 2 ;;
+      --harness)        harness="$2"; shift 2 ;;
       -s|--session)     session_name="$2"; shift 2 ;;
       --agent)          agent="$2"; shift 2 ;;
       --mcp-config)     mcp_config="$2"; shift 2 ;;
@@ -715,6 +717,10 @@ cmd_spawn() {
     esac
   done
   [ -z "${session_name}" ] && session_name="${SESSION_PREFIX}${nick}"
+  case "${harness}" in
+    claude|codex) ;;
+    *) echo "error: unknown harness '${harness}' — must be one of: claude, codex" >&2; return 1 ;;
+  esac
   if [ "${model_explicit}" -eq 1 ] && [ -n "${agent}" ]; then
     echo "error: --model and --agent are mutually exclusive — the agent's frontmatter wins on model, so --model would be silently ignored" >&2
     exit 1
@@ -864,7 +870,7 @@ cmd_spawn() {
   # not set so the operator can tell the wrapper deliberately didn't pass
   # one through (the agent's frontmatter `permissionMode:` or claude's own
   # default applies).
-  echo "spawning ${nick} in ${channels} (session ${session_name}, model: ${model}, permission-mode: ${permission_mode:-(claude default)}, cache-ttl: ${cache_ttl:-(claude default)}, shell: ${shell_basename}, cwd: ${cwd})"
+  echo "spawning ${nick} in ${channels} (session ${session_name}, model: ${model}, harness: ${harness}, permission-mode: ${permission_mode:-(claude default)}, cache-ttl: ${cache_ttl:-(claude default)}, shell: ${shell_basename}, cwd: ${cwd})"
   [ -n "${extra_str}" ] && echo "  extra claude args:${extra_str}"
 
   # Create a per-session data directory. mktemp guarantees uniqueness across
