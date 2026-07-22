@@ -29,4 +29,16 @@ else
 fi
 teardown
 
+# -- Test: codex harness fails fast with a spec pointer --
+setup
+err="$("${ROOST_BIN}" spawn testnick --harness codex --cwd "$TDIR" 2>&1)"; ec=$?
+if [ "$ec" -ne 0 ] \
+    && echo "$err" | grep -q "codex harness not yet implemented" \
+    && echo "$err" | grep -q "docs/superpowers/specs"; then
+  ok "codex harness fails fast with follow-on spec pointer"
+else
+  fail "codex harness fails fast with follow-on spec pointer" "ec=$ec err=$err"
+fi
+teardown
+
 echo ""; echo "Results: ${PASS} passed, ${FAIL} failed"; [ "$FAIL" -eq 0 ]
