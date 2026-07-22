@@ -784,6 +784,10 @@ cmd_spawn() {
     esac
   done
   [ -z "${session_name}" ] && session_name="${SESSION_PREFIX}${nick}"
+  if [ ! -d "${cwd}" ]; then
+    echo "error: --cwd ${cwd} is not a directory" >&2
+    exit 1
+  fi
   # signet-eval: a deterministic, LLM-free policy gate layered ahead of the
   # IRC permission relay. Auto-activates when a .signet/ directory exists in
   # the spawn cwd; --no-signet opts out even when .signet/ is present.
@@ -875,10 +879,6 @@ cmd_spawn() {
   fi
   if [ -n "${prompt_file}" ] && [ ! -f "${prompt_file}" ]; then
     echo "error: --prompt-file ${prompt_file} not found" >&2
-    exit 1
-  fi
-  if [ ! -d "${cwd}" ]; then
-    echo "error: --cwd ${cwd} is not a directory" >&2
     exit 1
   fi
   if [ "${perm_irc}" -eq 1 ] && [ -z "${perm_target}" ]; then

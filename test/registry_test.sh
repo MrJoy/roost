@@ -29,7 +29,7 @@ setup
 mkdir -p "$TDIR/.orchestrator"
 printf '{"project":"p","roles":{"worker":"claude-opus"},"providers":{"claude-opus":{"harness":"claude","model":"opus"}}}' > "$TDIR/.orchestrator/config.json"
 err="$(PATH="/usr/bin:/bin" "${ROOST_BIN}" spawn testnick --role worker --cwd "$TDIR" 2>&1)"; ec=$?
-# When jq is genuinely absent this must name jq; when jq exists in /usr/bin it resolves — accept either the jq error OR a successful resolution banner.
+# When jq is genuinely absent this must name jq. When jq exists in /usr/bin it resolves: accept either the jq error OR a successful resolution banner.
 if { [ "$ec" -ne 0 ] && echo "$err" | grep -qi "jq"; } || echo "$err" | grep -q "harness: claude"; then
   ok "registry spawn either resolves or errors naming jq"
 else
@@ -53,7 +53,7 @@ CFG='{"project":"p","providers":{"claude-opus":{"harness":"claude","model":"opus
 setup
 mkdir -p "$TDIR/.orchestrator"; printf '%s' "$CFG" > "$TDIR/.orchestrator/config.json"
 err="$("${ROOST_BIN}" spawn testnick --provider codex-gpt --cwd "$TDIR" 2>&1)"; ec=$?
-# codex resolves then the stub aborts — the banner must show the resolved harness/model first.
+# codex resolves then the stub aborts. The banner must show the resolved harness/model first.
 if echo "$err" | grep -q "harness: codex" && echo "$err" | grep -q "model: gpt-5.1-codex"; then
   ok "--provider resolves harness+model from registry"
 else
