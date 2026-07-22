@@ -719,7 +719,7 @@ cmd_spawn() {
   [ -z "${session_name}" ] && session_name="${SESSION_PREFIX}${nick}"
   case "${harness}" in
     claude|codex) ;;
-    *) echo "error: unknown harness '${harness}' — must be one of: claude, codex" >&2; return 1 ;;
+    *) echo "error: unknown harness '${harness}'. Must be one of: claude, codex" >&2; return 1 ;;
   esac
   if [ "${model_explicit}" -eq 1 ] && [ -n "${agent}" ]; then
     echo "error: --model and --agent are mutually exclusive — the agent's frontmatter wins on model, so --model would be silently ignored" >&2
