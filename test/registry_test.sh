@@ -119,6 +119,23 @@ else
 fi
 teardown
 
+# -- Test: provider base_url_env/auth_env flow into the inner env (via inner-cmd.txt env check) --
+# The adapter appends to RESP_TMUX_ENV, which bin/roost passes via `tmux -e`.
+# We assert on a staged env-manifest side-car the adapter also writes.
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"alt":{"harness":"claude","model":"opus","base_url_env":"ALT_URL","auth_env":"ALT_TOK"}}}' > "$TDIR/.orchestrator/config.json"
+out="$(ALT_URL="https://alt.example/v1" ALT_TOK="sk-test" ROOST_SPAWN_KEEP_DATA_DIR=1 "${ROOST_BIN}" spawn testnick --provider alt --cwd "$TDIR" 2>&1 || true)"
+data_dir="$(echo "$out" | sed -n 's/.*data dir (preflight): //p' | head -1)"
+if [ -n "$data_dir" ] \
+    && grep -qF 'ANTHROPIC_BASE_URL=https://alt.example/v1' "$data_dir/tmux-env.txt" 2>/dev/null \
+    && grep -qF 'ANTHROPIC_AUTH_TOKEN=sk-test' "$data_dir/tmux-env.txt" 2>/dev/null; then
+  ok "provider base_url_env/auth_env flow into tmux env"
+else
+  fail "provider base_url_env/auth_env flow into tmux env" "out=$out env=$(cat "$data_dir/tmux-env.txt" 2>/dev/null)"
+fi
+[ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
+
 echo ""
 echo "Results: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ]

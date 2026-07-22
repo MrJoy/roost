@@ -168,6 +168,30 @@ harness_assemble() {
     esac
     RESP_TMUX_ENV+=(-e "ROOST_PROMPT_FILE=${REQ_PROMPT_FILE}")
   fi
+  # Provider-configured backend swap. REQ_BASE_URL_ENV/REQ_AUTH_ENV hold the
+  # NAMES of env vars the operator populated with the real URL/token (from
+  # the provider's base_url_env/auth_env config, resolved by the registry).
+  # ${!name} is bash indirect expansion: it reads the VALUE of the env var
+  # whose name is stored in that variable. Only forwarded when the named
+  # var is actually set and non-empty, so an unconfigured provider adds
+  # nothing here.
+  if [ -n "${REQ_BASE_URL_ENV}" ]; then
+    local _url_val="${!REQ_BASE_URL_ENV:-}"
+    [ -n "${_url_val}" ] && RESP_TMUX_ENV+=(-e "ANTHROPIC_BASE_URL=${_url_val}")
+  fi
+  if [ -n "${REQ_AUTH_ENV}" ]; then
+    local _tok_val="${!REQ_AUTH_ENV:-}"
+    [ -n "${_tok_val}" ] && RESP_TMUX_ENV+=(-e "ANTHROPIC_AUTH_TOKEN=${_tok_val}")
+  fi
+  # Test seam: stage the tmux env additions for spawn tests. Written
+  # unconditionally (most spawns configure no backend env), so guard the
+  # empty-array case: "${arr[@]}" on an empty/unset array is unbound under
+  # set -u on bash 3.2 (the bash macOS ships).
+  if [ "${#RESP_TMUX_ENV[@]}" -gt 0 ]; then
+    printf '%s\n' "${RESP_TMUX_ENV[@]}" > "${REQ_DATA_DIR}/tmux-env.txt"
+  else
+    : > "${REQ_DATA_DIR}/tmux-env.txt"
+  fi
   # Same test seam as the data-dir preflight echo in the spawn wrapper: surface
   # the assembled inner command so the spawn_test.sh shell-flavor regressions
   # can grep for the prompt-read syntax that matches the resolved shell. Stage

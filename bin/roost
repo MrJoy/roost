@@ -1010,6 +1010,8 @@ cmd_spawn() {
   REQ_PERM_IRC="${perm_irc}"
   REQ_ASK_ROUTING="${ask_routing}"
   REQ_STEER_COMPACT="${steer_compact}"
+  REQ_BASE_URL_ENV="${RESOLVED_BASE_URL_ENV:-}"
+  REQ_AUTH_ENV="${RESOLVED_AUTH_ENV:-}"
   harness_assemble || return 1
   # Test seam: ROOST_SPAWN_KEEP_DATA_DIR=1 echoes the data-dir path early and
   # suppresses the failure-cleanup trap, so spawn_test.sh can read the files
