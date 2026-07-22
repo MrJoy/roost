@@ -6,6 +6,18 @@
 # Path to the project config, relative to the spawn cwd.
 _registry_config_path() { echo ".orchestrator/config.json"; }
 
+# registry_vendor_org <model> -> echoes the org by vendor lineage, or empty if
+# unknown. Bare aliases (opus/sonnet/haiku/fable) are Claude models used by
+# the default Claude path, so they map to anthropic same as claude-*.
+registry_vendor_org() {
+  local m="$1"
+  case "$m" in
+    claude-*|opus|sonnet|haiku|fable) echo "anthropic" ;;
+    gpt-*|o1|o1-*|o3|o3-*|o4|o4-*|o[0-9]*) echo "openai" ;;
+    *) echo "" ;;
+  esac
+}
+
 # registry_provider_fields <provider-name>
 # Sets RESOLVED_* from the provider entry. Returns 1 if the provider is absent.
 registry_provider_fields() {
@@ -19,8 +31,15 @@ registry_provider_fields() {
   RESOLVED_MODEL="$(printf '%s' "$entry" | jq -r '.model // empty')"
   RESOLVED_BASE_URL_ENV="$(printf '%s' "$entry" | jq -r '.base_url_env // empty')"
   RESOLVED_AUTH_ENV="$(printf '%s' "$entry" | jq -r '.auth_env // empty')"
-  RESOLVED_ORG="$(printf '%s' "$entry" | jq -r '.org // empty')"  # may be empty; filled by vendor lineage in a later task
+  RESOLVED_ORG="$(printf '%s' "$entry" | jq -r '.org // empty')"
   [ -n "$RESOLVED_MODEL" ] || { echo "error: provider '${name}' has no model in .orchestrator/config.json" >&2; return 1; }
+  if [ -z "$RESOLVED_ORG" ]; then
+    RESOLVED_ORG="$(registry_vendor_org "$RESOLVED_MODEL")"
+  fi
+  if [ -z "$RESOLVED_ORG" ]; then
+    echo "error: cannot determine org for model '${RESOLVED_MODEL}' by vendor lineage. Set an explicit \"org\" on provider '${RESOLVED_PROVIDER_NAME}' in .orchestrator/config.json" >&2
+    return 1
+  fi
   return 0
 }
 

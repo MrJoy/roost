@@ -94,6 +94,31 @@ else
 fi
 teardown
 
+# -- Test: claude-* model without explicit org resolves org=anthropic (visible via a debug echo) --
+# We expose resolution via ROOST_SPAWN_KEEP_DATA_DIR + a resolved-provider.txt side-car (added in this task).
+setup
+mkdir -p "$TDIR/.orchestrator"; printf '%s' "$CFG" > "$TDIR/.orchestrator/config.json"
+out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 "${ROOST_BIN}" spawn testnick --provider claude-opus --cwd "$TDIR" 2>&1 || true)"
+data_dir="$(echo "$out" | sed -n 's/.*data dir (preflight): //p' | head -1)"
+if [ -n "$data_dir" ] && grep -q '"org":"anthropic"' "$data_dir/resolved-provider.txt" 2>/dev/null; then
+  ok "claude-* lineage → org anthropic"
+else
+  fail "claude-* lineage → org anthropic" "out=$out rp=$(cat "$data_dir/resolved-provider.txt" 2>/dev/null)"
+fi
+[ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
+
+# -- Test: unknown model without org errors --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"weird":{"harness":"claude","model":"mystery-7b"}}}' > "$TDIR/.orchestrator/config.json"
+err="$("${ROOST_BIN}" spawn testnick --provider weird --cwd "$TDIR" 2>&1)"; ec=$?
+if [ "$ec" -ne 0 ] && echo "$err" | grep -q "cannot determine org for model 'mystery-7b'" && echo "$err" | grep -q '"org"'; then
+  ok "unknown model without org errors, names the fix"
+else
+  fail "unknown model without org errors, names the fix" "ec=$ec err=$err"
+fi
+teardown
+
 echo ""
 echo "Results: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ]

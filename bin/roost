@@ -923,6 +923,14 @@ cmd_spawn() {
   local ROOST_DATA_DIR
   ROOST_DATA_DIR="$(mktemp -d "/tmp/roost-${nick}.XXXXXXXX")"
   chmod 700 "${ROOST_DATA_DIR}"
+  # Side-car for the registry resolution above (test seam + future provider
+  # wiring): only written when --provider/--role actually resolved a provider,
+  # not on the bare --model/--agent path.
+  if [ -n "${RESOLVED_PROVIDER_NAME:-}" ]; then
+    printf '{"provider":"%s","harness":"%s","model":"%s","org":"%s"}\n' \
+      "${RESOLVED_PROVIDER_NAME}" "${RESOLVED_HARNESS}" "${RESOLVED_MODEL}" "${RESOLVED_ORG}" \
+      > "${ROOST_DATA_DIR}/resolved-provider.txt"
+  fi
   if [ -n "${prompt_text}" ]; then
     prompt_file="${ROOST_DATA_DIR}/prompt.txt"
     printf '%s' "${prompt_text}" > "${prompt_file}"
