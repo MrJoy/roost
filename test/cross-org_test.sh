@@ -24,6 +24,8 @@ teardown() {
   tmux kill-session -t "roost-p-worker-7" 2>/dev/null || true
   tmux kill-session -t "roost-p-reviewer-7" 2>/dev/null || true
   tmux kill-session -t "roost-p-reviewer-13" 2>/dev/null || true
+  tmux kill-session -t "roost-p-worker-14" 2>/dev/null || true
+  tmux kill-session -t "roost-p-reviewer-14" 2>/dev/null || true
   tmux kill-session -t "roost-p-worker-8" 2>/dev/null || true
   tmux kill-session -t "roost-p-reviewer-8" 2>/dev/null || true
   tmux kill-session -t "roost-p-worker-9" 2>/dev/null || true
@@ -101,7 +103,7 @@ teardown
 # -- Test: all-same-org reviewer set hard-fails without override --
 setup
 mkdir -p "$TDIR/.orchestrator"
-printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"worker":"c1","reviewer":["c1","c2"]}}' > "$TDIR/.orchestrator/config.json"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"},"gpt":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"worker":"c1","reviewer":["c1","c2"]}}' > "$TDIR/.orchestrator/config.json"
 "${ROOST_BIN}" spawn p-worker-8 --role worker --issue 8 --cwd "$TDIR" >/dev/null 2>&1 || true
 err="$("${ROOST_BIN}" spawn p-reviewer-8 --role reviewer --issue 8 --cwd "$TDIR" 2>&1)"; ec=$?
 if [ "$ec" -ne 0 ] && echo "$err" | grep -q "cross-org" && echo "$err" | grep -q "allow-same-org"; then
@@ -111,10 +113,28 @@ else
 fi
 teardown
 
+# -- Test: single-org registry allows a same-org reviewer with no error, no override --
+setup
+mkdir -p "$TDIR/.orchestrator"
+# Registry has exactly one org (all anthropic). There is no cross-org choice to
+# make, so the gate is a silent no-op: no error, no --allow-same-org, no override record.
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"worker":"c1","reviewer":["c2"]}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-worker-14 --role worker --issue 14 --cwd "$TDIR" >/dev/null 2>&1 || true
+out="$("${ROOST_BIN}" spawn p-reviewer-14 --role reviewer --issue 14 --cwd "$TDIR" 2>&1 || true)"
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if echo "$out" | grep -q "harness: claude" && echo "$out" | grep -q "model: sonnet" \
+    && ! echo "$out" | grep -qi "cross-org" \
+    && ! { jq -e '.["14#override"]' "$asn" >/dev/null 2>&1; }; then
+  ok "single-org registry allows same-org reviewer, no error, no override record"
+else
+  fail "single-org registry allows same-org reviewer, no error, no override record" "out=$out asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
 # -- Test: --allow-same-org bypasses and records the override --
 setup
 mkdir -p "$TDIR/.orchestrator"
-printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"worker":"c1","reviewer":["c2"]}}' > "$TDIR/.orchestrator/config.json"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"},"gpt":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"worker":"c1","reviewer":["c2"]}}' > "$TDIR/.orchestrator/config.json"
 "${ROOST_BIN}" spawn p-worker-9 --role worker --issue 9 --cwd "$TDIR" >/dev/null 2>&1 || true
 out="$("${ROOST_BIN}" spawn p-reviewer-9 --role reviewer --issue 9 --allow-same-org "only reviewer available" --cwd "$TDIR" 2>&1 || true)"
 "${ROOST_BIN}" spawn p-reviewer-9b --role reviewer --issue 9 --allow-same-org "second pass" --cwd "$TDIR" >/dev/null 2>&1 || true
@@ -136,7 +156,7 @@ teardown
 # -- Test: a custom-named review role is gated (not just "reviewer") --
 setup
 mkdir -p "$TDIR/.orchestrator"
-printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"builder":{"candidates":["c1"],"author":true},"auditor":{"candidates":["c1","c2"],"review":true}}}' > "$TDIR/.orchestrator/config.json"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"},"gpt":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"builder":{"candidates":["c1"],"author":true},"auditor":{"candidates":["c1","c2"],"review":true}}}' > "$TDIR/.orchestrator/config.json"
 "${ROOST_BIN}" spawn p-builder-20 --role builder --issue 20 --cwd "$TDIR" >/dev/null 2>&1 || true
 err="$("${ROOST_BIN}" spawn p-auditor-20 --role auditor --issue 20 --cwd "$TDIR" 2>&1)"; ec=$?
 # author c1 is anthropic; auditor candidates c1,c2 are both anthropic -> gate hard-fails.

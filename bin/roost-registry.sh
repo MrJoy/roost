@@ -18,6 +18,26 @@ registry_vendor_org() {
   esac
 }
 
+# registry_org_count -> echoes the number of DISTINCT orgs across all providers
+# in .orchestrator/config.json. Used by the reviewer gate to detect a single-org
+# registry, where there is no cross-org choice to enforce. Resolves each
+# provider's org the same way registry_provider_fields does (explicit .org, else
+# vendor lineage of the model). Clobbers RESOLVED_* as a side effect, so callers
+# resolve their own provider afterward. Echoes 0 when the config is absent.
+registry_org_count() {
+  local cfg; cfg="$(_registry_config_path)"
+  [ -f "$cfg" ] || { echo 0; return 0; }
+  local names; names="$(jq -r '.providers | keys[]?' "$cfg" 2>/dev/null)"
+  local orgs="" p
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    if registry_provider_fields "$p" >/dev/null 2>&1; then
+      orgs="${orgs}${RESOLVED_ORG}"$'\n'
+    fi
+  done <<< "$names"
+  printf '%s' "$orgs" | grep -v '^$' | sort -u | grep -c .
+}
+
 # registry_provider_fields <provider-name>
 # Sets RESOLVED_* from the provider entry. Returns 1 if the provider is absent.
 registry_provider_fields() {
@@ -203,6 +223,14 @@ policy_gate_reviewer() {
     return 0
   fi
   # No cross-org candidate.
+  local _org_n; _org_n="$(registry_org_count)"
+  if [ "${_org_n}" -le 1 ]; then
+    # Single-org registry: there is no cross-org choice to make, so nothing to
+    # enforce. Resolve the top candidate and allow silently. The gate engages on
+    # its own the moment a second org's provider is added to the registry.
+    registry_provider_fields "$top" || return 1
+    return 0
+  fi
   if [ "$allow" = "1" ]; then
     registry_provider_fields "$top" || return 1
     echo "  WARNING: cross-org gate OVERRIDE. Reviewer '${top}' is same org ('${author_org}') as the author. Reason: ${reason}" >&2
