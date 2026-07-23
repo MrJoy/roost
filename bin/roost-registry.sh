@@ -136,6 +136,22 @@ assignment_append() {
      "$f" > "$tmp" && mv "$tmp" "$f"
 }
 
+# bypass_audit <issue> <provider> <org>
+# Explicit launch-target spawns (--provider, explicit --model/--harness) carry
+# no role, so the cross-org gate cannot run. When such a spawn targets an issue
+# that already has a recorded author, append a #bypass record and note it, so
+# the un-gated spawn is auditable after the fact. Silent no-op when the issue
+# has no recorded author (nothing to audit against). Assumes jq is present and
+# the cwd is the spawn target. Always returns 0.
+bypass_audit() {
+  local issue="$1" provider="$2" org="$3"
+  [ -n "$issue" ] || return 0
+  [ -f "$(_assignment_path)" ] || return 0
+  [ -n "$(assignment_lookup "$issue")" ] || return 0
+  echo "  note: explicit launch target for issue ${issue}; cross-org gate not evaluated (no role). Appending #bypass audit record." >&2
+  assignment_append "${issue}#bypass" "explicit-bypass" "$provider" "$org" "explicit launch target; cross-org gate not evaluated"
+}
+
 # assignment_lookup <issue> -> echoes the recorded org, or empty if none.
 assignment_lookup() {
   local issue="$1" f; f="$(_assignment_path)"

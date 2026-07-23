@@ -33,6 +33,13 @@ teardown() {
   tmux kill-session -t "roost-p-auditor-20" 2>/dev/null || true
   tmux kill-session -t "roost-p-builder-21" 2>/dev/null || true
   tmux kill-session -t "roost-p-scout-22" 2>/dev/null || true
+  tmux kill-session -t "roost-p-x-30" 2>/dev/null || true
+  tmux kill-session -t "roost-p-worker-30" 2>/dev/null || true
+  tmux kill-session -t "roost-p-x-31" 2>/dev/null || true
+  tmux kill-session -t "roost-p-worker-31" 2>/dev/null || true
+  tmux kill-session -t "roost-p-x-32a" 2>/dev/null || true
+  tmux kill-session -t "roost-p-x-32b" 2>/dev/null || true
+  tmux kill-session -t "roost-p-x-33" 2>/dev/null || true
   trap - EXIT
   TDIR=""
 }
@@ -163,6 +170,69 @@ if echo "$out" | grep -q "harness: claude" \
   ok "neutral role 'scout' is ungated and records nothing"
 else
   fail "neutral role 'scout' is ungated and records nothing" "out=$out asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test: --provider path for a known issue with a recorded author appends #bypass --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-worker-30 --role worker --issue 30 --cwd "$TDIR" >/dev/null 2>&1 || true
+out="$("${ROOST_BIN}" spawn p-x-30 --provider c2 --issue 30 --cwd "$TDIR" 2>&1 || true)"
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if echo "$out" | grep -qi "gate not evaluated" \
+    && jq -e '.["30#bypass"] | type == "array" and length == 1 and .[0].kind == "explicit-bypass" and .[0].provider == "c2"' "$asn" >/dev/null 2>&1; then
+  ok "--provider path for a known issue appends a #bypass audit record"
+else
+  fail "--provider path for a known issue appends a #bypass audit record" "out=$out asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test: explicit --model for a known issue appends #bypass --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-worker-31 --role worker --issue 31 --cwd "$TDIR" >/dev/null 2>&1 || true
+out="$("${ROOST_BIN}" spawn p-x-31 --model sonnet --issue 31 --cwd "$TDIR" 2>&1 || true)"
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if echo "$out" | grep -qi "gate not evaluated" \
+    && jq -e '.["31#bypass"][0].kind == "explicit-bypass" and .["31#bypass"][0].org == "anthropic"' "$asn" >/dev/null 2>&1; then
+  ok "explicit --model for a known issue appends a #bypass audit record"
+else
+  fail "explicit --model for a known issue appends a #bypass audit record" "out=$out asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test (NEGATIVE): fully-explicit worker+reviewer leaves no #bypass mark --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{}}' > "$TDIR/.orchestrator/config.json"
+# Worker spawned explicitly (--provider), so NO author is recorded; the later
+# explicit reviewer spawn therefore has no recorded author to trigger against.
+"${ROOST_BIN}" spawn p-x-32a --provider c1 --issue 32 --cwd "$TDIR" >/dev/null 2>&1 || true
+"${ROOST_BIN}" spawn p-x-32b --provider c2 --issue 32 --cwd "$TDIR" >/dev/null 2>&1 || true
+asn="$TDIR/.orchestrator/provider-assignments.json"
+# The audit is inherently limited: with no recorded author, there is nothing to
+# audit against, so no #bypass record exists. This pins that it does not
+# over-trigger on an unknown issue.
+if ! { [ -f "$asn" ] && jq -e '.["32#bypass"]' "$asn" >/dev/null 2>&1; } \
+    && ! { [ -f "$asn" ] && jq -e '.["32"]' "$asn" >/dev/null 2>&1; }; then
+  ok "fully-explicit worker+reviewer leaves no author and no #bypass mark"
+else
+  fail "fully-explicit worker+reviewer leaves no author and no #bypass mark" "asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test: --provider with no recorded author writes no #bypass --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c2":{"harness":"claude","model":"sonnet"}},"roles":{}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-x-33 --provider c2 --issue 33 --cwd "$TDIR" >/dev/null 2>&1 || true
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if ! { [ -f "$asn" ] && jq -e '.["33#bypass"]' "$asn" >/dev/null 2>&1; }; then
+  ok "--provider with no recorded author writes no #bypass"
+else
+  fail "--provider with no recorded author writes no #bypass" "asn=$(cat "$asn" 2>/dev/null)"
 fi
 teardown
 

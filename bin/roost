@@ -839,6 +839,9 @@ cmd_spawn() {
     cd "${cwd}" || return 1
     if [ -n "${provider}" ]; then
       registry_provider_fields "${provider}"; _registry_rc=$?
+      # Explicit launch target: no role, so the gate never ran. Audit if this
+      # touches a known issue with a recorded author.
+      [ "${_registry_rc}" -eq 0 ] && bypass_audit "${issue_key}" "${RESOLVED_PROVIDER_NAME}" "${RESOLVED_ORG}"
     elif registry_role_is_review "${role}"; then
       policy_gate_reviewer "${issue_key}" "${role}" "${allow_same_org}" "${allow_same_org_reason}"
       _registry_rc=$?
@@ -863,6 +866,28 @@ cmd_spawn() {
   fi
   if [ -z "${model}" ] && [ -z "${agent}" ]; then
     model="opus"
+  fi
+  # Bypass audit for explicit --model/--harness (the --provider path is audited
+  # inside the registry block). These flags skip the registry entirely, so this
+  # engages jq only when .orchestrator/provider-assignments.json already exists,
+  # preserving the "a bare spawn never needs jq" invariant. --agent is excluded:
+  # its model comes from the agent frontmatter, a separate path.
+  if { [ "${model_explicit}" -eq 1 ] || [ "${harness_explicit}" -eq 1 ]; } \
+      && [ -z "${provider}" ] && [ -z "${agent}" ] && [ -n "${issue_key}" ]; then
+    local _audit_prev_pwd; _audit_prev_pwd="$(pwd)"
+    cd "${cwd}" || return 1
+    if [ -f ".orchestrator/provider-assignments.json" ]; then
+      if command -v jq &>/dev/null; then
+        # shellcheck source=bin/roost-registry.sh disable=SC1091
+        source "$(dirname "${ROOST_BIN}")/roost-registry.sh"
+        local _audit_org; _audit_org="$(registry_vendor_org "${model}")"
+        [ -n "${_audit_org}" ] || _audit_org="unknown"
+        bypass_audit "${issue_key}" "" "${_audit_org}"
+      else
+        echo "  note: issue ${issue_key} has .orchestrator state but jq is absent; skipping #bypass audit." >&2
+      fi
+    fi
+    cd "${_audit_prev_pwd}" || return 1
   fi
   local prompt_sources=0
   [ -n "${prompt_file}" ]     && prompt_sources=$((prompt_sources + 1))
