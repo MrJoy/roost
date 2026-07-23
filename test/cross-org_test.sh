@@ -45,6 +45,7 @@ teardown() {
   tmux kill-session -t "roost-p-both-40" 2>/dev/null || true
   tmux kill-session -t "roost-p-worker-50" 2>/dev/null || true
   tmux kill-session -t "roost-p-worker-51" 2>/dev/null || true
+  tmux kill-session -t "roost-p-worker-52" 2>/dev/null || true
   trap - EXIT
   TDIR=""
 }
@@ -72,8 +73,12 @@ mkdir -p "$TDIR/.orchestrator"
 printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
 out="$("${ROOST_BIN}" spawn p-worker-50 --role worker --model sonnet --issue 50 --cwd "$TDIR" 2>&1 || true)"
 asn="$TDIR/.orchestrator/provider-assignments.json"
+# The role path is excluded from the later explicit-model bypass audit (that
+# block only fires with neither --provider nor --role set), so a same-org
+# override records author only, never a spurious #bypass entry.
 if echo "$out" | grep -q "model: sonnet" \
-    && jq -e '.["50"].org == "anthropic" and .["50"].role == "worker"' "$asn" >/dev/null 2>&1; then
+    && jq -e '.["50"].org == "anthropic" and .["50"].role == "worker"' "$asn" >/dev/null 2>&1 \
+    && jq -e 'has("50#bypass") | not' "$asn" >/dev/null 2>&1; then
   ok "R1: --role worker --model sonnet records author AND launches sonnet"
 else
   fail "R1: --role worker --model sonnet records author AND launches sonnet" "out=$out asn=$(cat "$asn" 2>/dev/null)"
@@ -91,6 +96,23 @@ if [ "$ec" -ne 0 ] && echo "$err" | grep -qi "differs from role" && echo "$err" 
   ok "R1: cross-org override model errors"
 else
   fail "R1: cross-org override model errors" "ec=$ec err=$err"
+fi
+teardown
+
+# -- Test (R1): a rejected cross-org override leaves no author record --
+setup
+mkdir -p "$TDIR/.orchestrator"
+# Same shape as the case above, but the assertion here is on the durable state:
+# the org-coherence check must reject BEFORE assignment_record runs, so a
+# rejected spawn leaves no author record for the issue at all.
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
+err="$("${ROOST_BIN}" spawn p-worker-52 --role worker --model gpt-5.1-codex --issue 52 --cwd "$TDIR" 2>&1)"; ec=$?
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if [ "$ec" -ne 0 ] \
+    && ! { [ -f "$asn" ] && jq -e '.["52"]' "$asn" >/dev/null 2>&1; }; then
+  ok "R1: rejected cross-org override leaves no author record on disk"
+else
+  fail "R1: rejected cross-org override leaves no author record on disk" "ec=$ec asn=$(cat "$asn" 2>/dev/null)"
 fi
 teardown
 

@@ -891,6 +891,20 @@ cmd_spawn() {
     else
       registry_resolve_role "${role}"; _registry_rc=$?
     fi
+    # Org-coherence: an explicit --model on a --role spawn must be from the same
+    # vendor org the role resolved to. Picking a role from one org and a model
+    # from another is incoherent. In a single-org deployment the vendor orgs
+    # always match, so this never triggers there. Runs BEFORE the author-record
+    # block below: a rejected cross-org override must not leave a durable
+    # author record on disk, so the gate has to reject first.
+    if [ "${_registry_rc}" -eq 0 ] && [ "${model_explicit}" -eq 1 ] && [ -n "${role}" ]; then
+      local _override_org; _override_org="$(registry_vendor_org "${model}")"
+      if [ -n "${_override_org}" ] && [ "${_override_org}" != "${RESOLVED_ORG}" ]; then
+        cd "${_registry_prev_pwd}" || return 1
+        echo "error: --model '${model}' (org '${_override_org}') differs from role '${role}' org '${RESOLVED_ORG}'. Pick a model from the role's org, or drop --role." >&2
+        return 1
+      fi
+    fi
     # Record the resolved author-org for any author role (config "author": true
     # or the built-in "worker" default), not just the literal name "worker".
     # Must run before hopping back out of --cwd: assignment_record writes a
@@ -908,18 +922,6 @@ cmd_spawn() {
     # above. Only adopt the resolved value when the operator did not pin one.
     [ "${harness_explicit}" -eq 0 ] && harness="${RESOLVED_HARNESS}"
     [ "${model_explicit}" -eq 0 ] && model="${RESOLVED_MODEL}"
-    # Org-coherence: an explicit --model on a --role spawn must be from the same
-    # vendor org the role resolved to. Picking a role from one org and a model
-    # from another is incoherent. In a single-org deployment the vendor orgs
-    # always match, so this never triggers there.
-    if [ "${model_explicit}" -eq 1 ] && [ -n "${role}" ]; then
-      local _override_org; _override_org="$(registry_vendor_org "${model}")"
-      if [ -n "${_override_org}" ] && [ "${_override_org}" != "${RESOLVED_ORG}" ]; then
-        cd "${_registry_prev_pwd}" || return 1
-        echo "error: --model '${model}' (org '${_override_org}') differs from role '${role}' org '${RESOLVED_ORG}'. Pick a model from the role's org, or drop --role." >&2
-        return 1
-      fi
-    fi
     # base_url_env / auth_env / org are consumed by later provider-wiring work.
   fi
   if [ -z "${model}" ] && [ -z "${agent}" ]; then
