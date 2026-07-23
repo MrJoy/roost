@@ -40,6 +40,7 @@ teardown() {
   tmux kill-session -t "roost-p-x-32a" 2>/dev/null || true
   tmux kill-session -t "roost-p-x-32b" 2>/dev/null || true
   tmux kill-session -t "roost-p-x-33" 2>/dev/null || true
+  tmux kill-session -t "roost-p-both-40" 2>/dev/null || true
   trap - EXIT
   TDIR=""
 }
@@ -233,6 +234,19 @@ if ! { [ -f "$asn" ] && jq -e '.["33#bypass"]' "$asn" >/dev/null 2>&1; }; then
   ok "--provider with no recorded author writes no #bypass"
 else
   fail "--provider with no recorded author writes no #bypass" "asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+
+# -- Test: a role declaring both author and review fails fast --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"both":{"candidates":["c1"],"author":true,"review":true}}}' > "$TDIR/.orchestrator/config.json"
+err="$("${ROOST_BIN}" spawn p-both-40 --role both --issue 40 --cwd "$TDIR" 2>&1)"; ec=$?
+if [ "$ec" -ne 0 ] && echo "$err" | grep -q "role 'both' declares both author and review"; then
+  ok "role declaring both author and review fails fast"
+else
+  fail "role declaring both author and review fails fast" "ec=$ec err=$err"
 fi
 teardown
 

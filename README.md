@@ -207,9 +207,10 @@ roost spawn scratch-h -c '#sandbox' -m haiku \
 `providers` (named entries with a harness, a model, and optionally
 `base_url_env` / `auth_env` naming the env vars that hold an alternate
 backend's URL and token) and `roles`. A role value is a provider name, a
-list of candidates, or an object `{"candidates": [...], "author": true,
-"review": true}`. Fill these in to let `roost spawn --provider NAME` or
-`roost spawn --role NAME` pick harness, model, and backend for you.
+list of candidates, or an object `{"candidates": [...], "author": true}`
+or `{"candidates": [...], "review": true}`. Fill these in to let `roost
+spawn --provider NAME` or `roost spawn --role NAME` pick harness, model,
+and backend for you.
 Provider resolution order: explicit `--harness`, `--model`, or `--agent`
 always wins and skips the registry entirely. `--provider` resolves that
 named provider directly. `--role` resolves through the roles map in
@@ -239,7 +240,9 @@ Migrating from a plain candidate list: a custom-named review role (for
 example `auditor`) must declare `"review": true` to be gated. A
 custom-named author role must declare `"author": true` to record
 authorship. Bare `worker`/`reviewer` keep their original name-based
-behavior, no config change needed.
+behavior, no config change needed. A role declares at most one of
+`author`/`review`; declaring both is a config error and spawn refuses to
+start.
 
 ## Project dispatcher
 

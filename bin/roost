@@ -301,7 +301,9 @@ Provider selection:
   Cross-org rule: a review role's provider org must differ from the recorded author org.
   Roles are declared in .orchestrator/config.json .roles. A role
   value is a provider name, a list of candidates, or an object
-  {"candidates": [...], "author": true, "review": true}. An author role
+  {"candidates": [...], "author": true} or {"candidates": [...], "review": true}.
+  A role declares at most one of "author"/"review"; declaring both is a
+  config error and spawn refuses to start. An author role
   records the author org for its issue. A review role is gated: the spawn
   picks the first candidate whose org differs from the author, and fails when
   every candidate is same-org. A role that is neither records nothing and is
@@ -849,6 +851,17 @@ cmd_spawn() {
     local _registry_prev_pwd _registry_rc
     _registry_prev_pwd="$(pwd)"
     cd "${cwd}" || return 1
+    # A role must declare at most one of author/review. Both true would let the
+    # reviewer gate's resolved org silently overwrite the author record below
+    # (assignment_record runs unconditionally for author roles), corrupting the
+    # cross-org gate's audit trail for a later reviewer on the same issue. Fail
+    # fast instead of picking one path arbitrarily. Scoped to the role path only:
+    # the --provider path has no role, so the contradiction cannot occur there.
+    if [ -z "${provider}" ] && registry_role_is_review "${role}" && registry_role_is_author "${role}"; then
+      echo "error: role '${role}' declares both author and review; a role must declare at most one" >&2
+      cd "${_registry_prev_pwd}" || return 1
+      return 1
+    fi
     if [ -n "${provider}" ]; then
       registry_provider_fields "${provider}"; _registry_rc=$?
       # Explicit launch target: no role, so the gate never ran. Audit if this
