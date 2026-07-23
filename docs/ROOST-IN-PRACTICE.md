@@ -31,8 +31,8 @@ now (nothing blocking them), which are deferred, which it wants to
 sequence carefully. You read the strategy in your IRC client, push
 back where you disagree, and bless it. From there the agent runs.
 
-That agent is **project-manager**. Its operational playbook lives at
-`agents/project-manager.md` — issue pickup, milestone strategy, the go/no-go
+That agent is **lead-pm**. Its operational playbook lives at
+`agents/lead-pm.md` — issue pickup, milestone strategy, the go/no-go
 gates, human-review coordination. It sits in
 `#<project>-leads` continuously and joins each issue channel while
 it's active. On startup it spawns an **APM** sidekick
@@ -109,7 +109,7 @@ through channels, your messages land in the same feed the agents
 are already reading. There's no second pathway for "human-to-agent"
 — you're just another nick on the IRC server.
 
-The agent and prompt files (`agents/project-manager.md`,
+The agent and prompt files (`agents/lead-pm.md`,
 `prompts/worker.md`, `agents/reviewer.md`) are the operational
 source of truth — they're what the agents actually run, and they're
 the right starting point for standing up your own project on Roost.

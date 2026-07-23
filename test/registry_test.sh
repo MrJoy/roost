@@ -74,6 +74,19 @@ else
 fi
 teardown
 
+# -- Test: --role worker / --role reviewer resolve against a seeded config --
+setup
+mkdir -p "$TDIR/.orchestrator"
+# Mirror what `roost init` seeds: a claude-default provider and worker/reviewer roles.
+printf '{"project":"p","providers":{"claude-default":{"harness":"claude","model":"opus"}},"roles":{"worker":{"candidates":["claude-default"],"author":true},"reviewer":{"candidates":["claude-default"],"review":true}}}' > "$TDIR/.orchestrator/config.json"
+wout="$("${ROOST_BIN}" spawn testnick --role worker --issue 70 --cwd "$TDIR" 2>&1 || true)"
+if echo "$wout" | grep -q "harness: claude" && echo "$wout" | grep -q "model: opus"; then
+  ok "seeded --role worker resolves to claude-default opus"
+else
+  fail "seeded --role worker resolves to claude-default opus" "wout=$wout"
+fi
+teardown
+
 CFG='{"project":"p","providers":{"claude-opus":{"harness":"claude","model":"opus"},"codex-gpt":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"pm":"claude-opus","worker":["codex-gpt","claude-opus"]}}'
 
 # -- Test: --provider resolves harness + model --

@@ -149,7 +149,7 @@ if roost_init --repo "TestOwner/myproject" >/dev/null 2>&1; then
   dry_out="$(roost_init --repo "TestOwner/myproject" --dry-run 2>/dev/null)"
 fi
 if echo "$dry_out" | grep -q 'worker.md' \
-    && echo "$dry_out" | grep -q 'project-manager.md'; then
+    && echo "$dry_out" | grep -q 'lead-pm.md'; then
   ok "--dry-run: shows prompts/agents unconditionally when files exist"
 else
   fail "--dry-run: shows prompts/agents unconditionally when files exist"
@@ -336,7 +336,7 @@ teardown
 setup ""
 cd "$TDIR"
 if roost_init --repo "TestOwner/myproject" >/dev/null 2>&1 \
-    && [ -f "${TDIR}/.claude/agents/project-manager.md" ] \
+    && [ -f "${TDIR}/.claude/agents/lead-pm.md" ] \
     && [ -f "${TDIR}/.claude/agents/associate-pm.md" ] \
     && [ -f "${TDIR}/.claude/agents/reviewer.md" ]; then
   ok "agents: fresh copy to .claude/agents/"
@@ -428,9 +428,9 @@ teardown
 setup ""
 cd "$TDIR"
 mkdir -p .claude/agents
-echo 'custom content' > .claude/agents/project-manager.md
+echo 'custom content' > .claude/agents/lead-pm.md
 roost_init --repo "TestOwner/myproject" >/dev/null 2>&1
-if grep -q 'custom content' "${TDIR}/.claude/agents/project-manager.md"; then
+if grep -q 'custom content' "${TDIR}/.claude/agents/lead-pm.md"; then
   ok "agents: existing file not overwritten without --force-agents"
 else
   fail "agents: existing file not overwritten without --force-agents"
@@ -444,10 +444,10 @@ setup ""
 cd "$TDIR"
 mkdir -p .claude/agents .orchestrator
 echo '{"project":"test"}' > .orchestrator/config.json
-echo 'custom content' > .claude/agents/project-manager.md
+echo 'custom content' > .claude/agents/lead-pm.md
 roost_init --force-agents >/dev/null 2>&1
-if ! grep -q 'custom content' "${TDIR}/.claude/agents/project-manager.md" \
-    && grep -q 'name' "${TDIR}/.claude/agents/project-manager.md"; then
+if ! grep -q 'custom content' "${TDIR}/.claude/agents/lead-pm.md" \
+    && grep -q 'name' "${TDIR}/.claude/agents/lead-pm.md"; then
   ok "agents: --force-agents overwrites existing"
 else
   fail "agents: --force-agents overwrites existing"
@@ -461,7 +461,7 @@ setup ""
 cd "$TDIR"
 roost_init --repo "TestOwner/myproject" --no-agents >/dev/null 2>&1
 if [ ! -d "${TDIR}/.claude/agents" ] \
-    || [ ! -f "${TDIR}/.claude/agents/project-manager.md" ]; then
+    || [ ! -f "${TDIR}/.claude/agents/lead-pm.md" ]; then
   ok "agents: --no-agents skips copy"
 else
   fail "agents: --no-agents skips copy"
@@ -514,15 +514,18 @@ fi
 cd - >/dev/null
 teardown
 
-# --- providers/roles: scaffolded as empty objects ---
+# --- providers/roles: seeded with a default Claude provider + worker/reviewer roles ---
 
 setup ""
 cd "$TDIR"
 roost_init --repo "TestOwner/myproject" >/dev/null 2>&1
-if jq -e 'has("providers") and has("roles")' "${TDIR}/.orchestrator/config.json" >/dev/null 2>&1; then
-  ok "init scaffolds providers + roles keys"
+cfg="${TDIR}/.orchestrator/config.json"
+if jq -e '.providers["claude-default"].harness == "claude" and .providers["claude-default"].model == "opus"' "$cfg" >/dev/null 2>&1 \
+    && jq -e '.roles.worker.author == true and (.roles.worker.candidates | index("claude-default"))' "$cfg" >/dev/null 2>&1 \
+    && jq -e '.roles.reviewer.review == true and (.roles.reviewer.candidates | index("claude-default"))' "$cfg" >/dev/null 2>&1; then
+  ok "init seeds claude-default provider + worker/reviewer roles"
 else
-  fail "init scaffolds providers + roles keys"
+  fail "init seeds claude-default provider + worker/reviewer roles"
 fi
 cd - >/dev/null
 teardown

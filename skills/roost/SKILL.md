@@ -113,7 +113,10 @@ without `--provider` or `--role` works exactly as it does today.
 from that role's candidates. The two flags are mutually exclusive.
 
 Provider resolution order: explicit `--harness`, `--model`, or `--agent`
-always wins and skips the registry entirely. `--provider` resolves that
+wins over the registry's resolved launch target. Paired with `--role` or
+`--provider`, the registry still resolves and records authorship. A review
+role still gates the launch. On their own, with no `--role` and no
+`--provider`, they skip the registry entirely. `--provider` resolves that
 named provider directly. `--role` resolves through the roles map in
 `.orchestrator/config.json`. No `--provider` and no `--role` means no
 registry: today's behavior, claude harness with the opus default.
@@ -135,6 +138,15 @@ Explicit launch targets (`--provider`, `--model`, `--harness`) carry no
 role, so the gate cannot run. When one targets an issue that already has
 a recorded author, roost notes it and appends a `#bypass` audit record.
 It does not block: explicit flags win.
+
+Where this fires: live on `--role`/`--provider` and the migrated automation
+templates. A no-op in a single-org registry, since there's no cross-org
+mix to catch; it starts working on its own once a second org's provider
+gets added. A hand-typed bare `--agent` spawn is fully inert: no role to
+gate, no registry read. A bare `--model`/`--harness` spawn can't run the
+gate either, since it carries no role. It still appends a `#bypass` audit
+when it targets an issue that already has a recorded author, as noted
+above.
 
 The Codex harness is a stub in this release. Spawning `--harness codex`
 (directly or via the registry) fails fast and names the follow-up
@@ -193,7 +205,7 @@ Routes AskUserQuestion calls to a channel instead of blocking the terminal; pair
 
 ```bash
 # The PM routes questions to the leads channel (human answers):
-roost spawn myproject-pm --agent project-manager \
+roost spawn myproject-pm --agent lead-pm \
   --ask-irc '#myproject-leads' --ask-target <your-nick>
 
 # APM routes questions to the leads channel (the PM answers):

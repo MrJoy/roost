@@ -24,6 +24,8 @@ teardown() {
   tmux kill-session -t "roost-p-worker-7" 2>/dev/null || true
   tmux kill-session -t "roost-p-reviewer-7" 2>/dev/null || true
   tmux kill-session -t "roost-p-reviewer-13" 2>/dev/null || true
+  tmux kill-session -t "roost-p-worker-14" 2>/dev/null || true
+  tmux kill-session -t "roost-p-reviewer-14" 2>/dev/null || true
   tmux kill-session -t "roost-p-worker-8" 2>/dev/null || true
   tmux kill-session -t "roost-p-reviewer-8" 2>/dev/null || true
   tmux kill-session -t "roost-p-worker-9" 2>/dev/null || true
@@ -41,6 +43,12 @@ teardown() {
   tmux kill-session -t "roost-p-x-32b" 2>/dev/null || true
   tmux kill-session -t "roost-p-x-33" 2>/dev/null || true
   tmux kill-session -t "roost-p-both-40" 2>/dev/null || true
+  tmux kill-session -t "roost-p-worker-50" 2>/dev/null || true
+  tmux kill-session -t "roost-p-worker-51" 2>/dev/null || true
+  tmux kill-session -t "roost-p-worker-52" 2>/dev/null || true
+  tmux kill-session -t "roost-p-reviewer-60" 2>/dev/null || true
+  tmux kill-session -t "roost-p-worker-60" 2>/dev/null || true
+  tmux kill-session -t "roost-p-reviewer-61" 2>/dev/null || true
   trap - EXIT
   TDIR=""
 }
@@ -59,6 +67,105 @@ else
   fail "worker spawn records author-org openai for issue 42" "$(cat "$TDIR/.orchestrator/provider-assignments.json" 2>/dev/null)"
 fi
 teardown
+
+# -- Test (R1): --role worker --model <override> records authorship AND runs on the override model --
+setup
+mkdir -p "$TDIR/.orchestrator"
+# Single-org registry: worker role resolves anthropic; override --model sonnet is
+# also anthropic, so the org-coherence check passes. Authorship is still recorded.
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
+out="$("${ROOST_BIN}" spawn p-worker-50 --role worker --model sonnet --issue 50 --cwd "$TDIR" 2>&1 || true)"
+asn="$TDIR/.orchestrator/provider-assignments.json"
+# The role path is excluded from the later explicit-model bypass audit (that
+# block only fires with neither --provider nor --role set), so a same-org
+# override records author only, never a spurious #bypass entry.
+if echo "$out" | grep -q "model: sonnet" \
+    && jq -e '.["50"].org == "anthropic" and .["50"].role == "worker"' "$asn" >/dev/null 2>&1 \
+    && jq -e 'has("50#bypass") | not' "$asn" >/dev/null 2>&1; then
+  ok "R1: --role worker --model sonnet records author AND launches sonnet"
+else
+  fail "R1: --role worker --model sonnet records author AND launches sonnet" "out=$out asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test (R1): a cross-org override model errors --
+setup
+mkdir -p "$TDIR/.orchestrator"
+# worker role resolves anthropic (c1=opus). Override --model gpt-5.1-codex is
+# openai. Picking an anthropic role and an openai model is incoherent -> error.
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
+err="$("${ROOST_BIN}" spawn p-worker-51 --role worker --model gpt-5.1-codex --issue 51 --cwd "$TDIR" 2>&1)"; ec=$?
+if [ "$ec" -ne 0 ] && echo "$err" | grep -qi "differs from role" && echo "$err" | grep -q "openai"; then
+  ok "R1: cross-org override model errors"
+else
+  fail "R1: cross-org override model errors" "ec=$ec err=$err"
+fi
+teardown
+
+# -- Test (R1): a rejected cross-org override leaves no author record --
+setup
+mkdir -p "$TDIR/.orchestrator"
+# Same shape as the case above, but the assertion here is on the durable state:
+# the org-coherence check must reject BEFORE assignment_record runs, so a
+# rejected spawn leaves no author record for the issue at all.
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
+err="$("${ROOST_BIN}" spawn p-worker-52 --role worker --model gpt-5.1-codex --issue 52 --cwd "$TDIR" 2>&1)"; ec=$?
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if [ "$ec" -ne 0 ] \
+    && ! { [ -f "$asn" ] && jq -e '.["52"]' "$asn" >/dev/null 2>&1; }; then
+  ok "R1: rejected cross-org override leaves no author record on disk"
+else
+  fail "R1: rejected cross-org override leaves no author record on disk" "ec=$ec asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test (R2): --agent reviewer --role reviewer runs the gate AND loads the persona --
+setup
+mkdir -p "$TDIR/.orchestrator" "$TDIR/.claude/agents"
+cp "$( cd "$( dirname "${ROOST_BIN}" )/.." && pwd )/agents/reviewer.md" "$TDIR/.claude/agents/reviewer.md"
+# Two orgs. Worker author = openai (gpt). Reviewer candidates = [claude-default
+# (anthropic)] -> gate picks the cross-org anthropic provider. --agent reviewer
+# loads the persona; the role selects the provider.
+printf '{"project":"p","providers":{"claude-default":{"harness":"claude","model":"opus"},"gpt":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"worker":"gpt","reviewer":["claude-default"]}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-worker-60 --role worker --issue 60 --cwd "$TDIR" >/dev/null 2>&1 || true
+out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 "${ROOST_BIN}" spawn p-reviewer-60 --agent reviewer --role reviewer --issue 60 --cwd "$TDIR" 2>&1 || true)"
+data_dir="$(echo "$out" | sed -n 's/.*data dir (preflight): //p' | head -1)"
+inner="$(cat "$data_dir/inner-cmd.txt" 2>/dev/null)"
+# harness/--agent/no-model alone don't distinguish "gate ran" from "gate was
+# skipped": both land on harness=claude, model="" in this config regardless.
+# resolved-provider.txt is the actual discriminator -- it is only written when
+# the registry path executes, so its presence (and org) proves --role really
+# drove resolution instead of --agent silently short-circuiting the guard.
+resolved="$(cat "$data_dir/resolved-provider.txt" 2>/dev/null)"
+if echo "$out" | grep -q "harness: claude" \
+    && echo "$inner" | grep -q -- "--agent reviewer" \
+    && ! echo "$inner" | grep -q -- "--model" \
+    && echo "$resolved" | grep -q '"org":"anthropic"'; then
+  ok "R2: --agent reviewer --role reviewer gates, loads persona, no --model on claude path"
+else
+  fail "R2: --agent reviewer --role reviewer gates, loads persona, no --model on claude path" "out=$out inner=$inner resolved=$resolved"
+fi
+[ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
+
+# -- Test (R2): bare --agent reviewer stays ungated and records nothing --
+setup
+mkdir -p "$TDIR/.orchestrator" "$TDIR/.claude/agents"
+cp "$( cd "$( dirname "${ROOST_BIN}" )/.." && pwd )/agents/reviewer.md" "$TDIR/.claude/agents/reviewer.md"
+printf '{"project":"p","providers":{"gpt":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"worker":"gpt"}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-worker-60 --role worker --issue 61 --cwd "$TDIR" >/dev/null 2>&1 || true
+out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 "${ROOST_BIN}" spawn p-reviewer-61 --agent reviewer --issue 61 --cwd "$TDIR" 2>&1 || true)"
+data_dir="$(echo "$out" | sed -n 's/.*data dir (preflight): //p' | head -1)"
+inner="$(cat "$data_dir/inner-cmd.txt" 2>/dev/null)"
+asn="$TDIR/.orchestrator/provider-assignments.json"
+# Bare --agent: persona loaded, no gate, no #override or reviewer record for issue 61.
+if echo "$inner" | grep -q -- "--agent reviewer" \
+    && ! echo "$inner" | grep -q -- "--model" \
+    && ! { jq -e '.["61#override"]' "$asn" >/dev/null 2>&1; }; then
+  ok "R2: bare --agent reviewer stays ungated, records nothing"
+else
+  fail "R2: bare --agent reviewer stays ungated, records nothing" "inner=$inner asn=$(cat "$asn" 2>/dev/null)"
+fi
+[ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
 
 # -- Test: issue key parsed from channel when --issue omitted --
 setup
@@ -101,7 +208,7 @@ teardown
 # -- Test: all-same-org reviewer set hard-fails without override --
 setup
 mkdir -p "$TDIR/.orchestrator"
-printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"worker":"c1","reviewer":["c1","c2"]}}' > "$TDIR/.orchestrator/config.json"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"},"gpt":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"worker":"c1","reviewer":["c1","c2"]}}' > "$TDIR/.orchestrator/config.json"
 "${ROOST_BIN}" spawn p-worker-8 --role worker --issue 8 --cwd "$TDIR" >/dev/null 2>&1 || true
 err="$("${ROOST_BIN}" spawn p-reviewer-8 --role reviewer --issue 8 --cwd "$TDIR" 2>&1)"; ec=$?
 if [ "$ec" -ne 0 ] && echo "$err" | grep -q "cross-org" && echo "$err" | grep -q "allow-same-org"; then
@@ -111,10 +218,28 @@ else
 fi
 teardown
 
+# -- Test: single-org registry allows a same-org reviewer with no error, no override --
+setup
+mkdir -p "$TDIR/.orchestrator"
+# Registry has exactly one org (all anthropic). There is no cross-org choice to
+# make, so the gate is a silent no-op: no error, no --allow-same-org, no override record.
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"worker":"c1","reviewer":["c2"]}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-worker-14 --role worker --issue 14 --cwd "$TDIR" >/dev/null 2>&1 || true
+out="$("${ROOST_BIN}" spawn p-reviewer-14 --role reviewer --issue 14 --cwd "$TDIR" 2>&1 || true)"
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if echo "$out" | grep -q "harness: claude" && echo "$out" | grep -q "model: sonnet" \
+    && ! echo "$out" | grep -qi "cross-org" \
+    && ! { jq -e '.["14#override"]' "$asn" >/dev/null 2>&1; }; then
+  ok "single-org registry allows same-org reviewer, no error, no override record"
+else
+  fail "single-org registry allows same-org reviewer, no error, no override record" "out=$out asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
 # -- Test: --allow-same-org bypasses and records the override --
 setup
 mkdir -p "$TDIR/.orchestrator"
-printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"worker":"c1","reviewer":["c2"]}}' > "$TDIR/.orchestrator/config.json"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"},"gpt":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"worker":"c1","reviewer":["c2"]}}' > "$TDIR/.orchestrator/config.json"
 "${ROOST_BIN}" spawn p-worker-9 --role worker --issue 9 --cwd "$TDIR" >/dev/null 2>&1 || true
 out="$("${ROOST_BIN}" spawn p-reviewer-9 --role reviewer --issue 9 --allow-same-org "only reviewer available" --cwd "$TDIR" 2>&1 || true)"
 "${ROOST_BIN}" spawn p-reviewer-9b --role reviewer --issue 9 --allow-same-org "second pass" --cwd "$TDIR" >/dev/null 2>&1 || true
@@ -136,7 +261,7 @@ teardown
 # -- Test: a custom-named review role is gated (not just "reviewer") --
 setup
 mkdir -p "$TDIR/.orchestrator"
-printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"builder":{"candidates":["c1"],"author":true},"auditor":{"candidates":["c1","c2"],"review":true}}}' > "$TDIR/.orchestrator/config.json"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"},"gpt":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"builder":{"candidates":["c1"],"author":true},"auditor":{"candidates":["c1","c2"],"review":true}}}' > "$TDIR/.orchestrator/config.json"
 "${ROOST_BIN}" spawn p-builder-20 --role builder --issue 20 --cwd "$TDIR" >/dev/null 2>&1 || true
 err="$("${ROOST_BIN}" spawn p-auditor-20 --role auditor --issue 20 --cwd "$TDIR" 2>&1)"; ec=$?
 # author c1 is anthropic; auditor candidates c1,c2 are both anthropic -> gate hard-fails.
@@ -201,6 +326,34 @@ if echo "$out" | grep -qi "gate not evaluated" \
   ok "explicit --model for a known issue appends a #bypass audit record"
 else
   fail "explicit --model for a known issue appends a #bypass audit record" "out=$out asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test: #bypass record carries the launched model and harness (--provider) --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-worker-30 --role worker --issue 30 --cwd "$TDIR" >/dev/null 2>&1 || true
+"${ROOST_BIN}" spawn p-x-30 --provider c2 --issue 30 --cwd "$TDIR" >/dev/null 2>&1 || true
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if jq -e '.["30#bypass"][0].model == "sonnet" and .["30#bypass"][0].harness == "claude"' "$asn" >/dev/null 2>&1; then
+  ok "#bypass (--provider) records launched model + harness"
+else
+  fail "#bypass (--provider) records launched model + harness" "asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test: #bypass record carries the launched model and harness (explicit --model) --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-worker-31 --role worker --issue 31 --cwd "$TDIR" >/dev/null 2>&1 || true
+"${ROOST_BIN}" spawn p-x-31 --model sonnet --issue 31 --cwd "$TDIR" >/dev/null 2>&1 || true
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if jq -e '.["31#bypass"][0].model == "sonnet" and .["31#bypass"][0].harness == "claude"' "$asn" >/dev/null 2>&1; then
+  ok "#bypass (explicit --model) records launched model + harness"
+else
+  fail "#bypass (explicit --model) records launched model + harness" "asn=$(cat "$asn" 2>/dev/null)"
 fi
 teardown
 

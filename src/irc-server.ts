@@ -155,6 +155,16 @@ export interface CreateMcpOptions {
 const localeTs = (dt: string | Date) =>
   (dt instanceof Date ? dt : new Date(dt)).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'long' })
 
+export type Delivery = 'notification' | 'tmux'
+
+// Inbound transport selector. `notification` (default) is the Claude path: push
+// notifications/claude/channel. `tmux` injects each inbound turn into the agent's
+// pane, for harnesses that do not wake on MCP notifications. Any unknown value
+// falls back to notification so a typo never silences inbound traffic.
+export function selectDelivery(raw: string | undefined): Delivery {
+  return raw === 'tmux' ? 'tmux' : 'notification'
+}
+
 // Wire the MCP server and subscribe to typed IRC events. Does NOT connect to
 // any transport or start the IRC connection — the caller does both after
 // createMcpServer returns. Call order: createMcpServer → server.connect(transport)
@@ -195,6 +205,13 @@ export function createMcpServer(client: RoostIrcClient, config: ClientConfig, op
   // Tracks whether any non-historical inbound message has been emitted in
   // this session — gates the always-attach-on-first-message behavior.
   let firstMessageSeen = false
+
+  // Inbound delivery mode. Read here rather than at the entrypoint because
+  // this function is where the message handler that consumes them lives.
+  // createMcpServer is also called directly by tests with a fake client, so
+  // the env read has to live in the same closure as the handler it gates.
+  const DELIVERY = selectDelivery(process.env['ROOST_DELIVERY'])
+  const TMUX_TARGET = process.env['ROOST_TMUX_TARGET'] ?? ''
 
   // ---- MCP server --------------------------------------------------------
 
@@ -283,10 +300,55 @@ export function createMcpServer(client: RoostIrcClient, config: ClientConfig, op
       `\n${UNREAD_HINT}`
   }
 
+  // Inject an inbound IRC message into the agent's tmux pane as a user turn, for
+  // the tmux delivery mode. Injections are serialized through a queue: each one
+  // runs to completion before the next starts, so concurrent arrivals never
+  // interleave their pastes. Pane-idle detection is a planned refinement and is
+  // not wired yet.
+  const injectQueue: string[] = []
+  let injecting = false
+  const flushInjectQueue = async () => {
+    if (injecting) return
+    injecting = true
+    try {
+      while (injectQueue.length > 0) {
+        const text = injectQueue.shift()!
+        // Isolate each injection. Bun.spawn throws synchronously when the
+        // helper is missing or not executable, and a mid-drain failure must
+        // not reject this loop: an unhandled rejection here would take down the
+        // whole MCP process. Log and move on so one bad paste never kills the
+        // IRC session.
+        try {
+          const proc = Bun.spawn(
+            [`${process.env['ROOST_DIR'] ?? '.'}/bin/roost-tmux-inject`, TMUX_TARGET, `roost-irc-${NICK}`],
+            { stdin: 'pipe', stdout: 'ignore', stderr: 'ignore' },
+          )
+          proc.stdin.write(text)
+          await proc.stdin.end()
+          await proc.exited
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err)
+          process.stderr.write(`roost-irc[${NICK}]: tmux inject failed: ${detail}\n`)
+        }
+      }
+    } finally {
+      injecting = false
+    }
+  }
+  const injectTmuxTurn = (_target: string, msg: IrcMessage) => {
+    const where = msg.isDirect ? `DM from ${msg.sender}` : `${msg.channel} <${msg.sender}>`
+    injectQueue.push(`[roost-irc] ${where}: ${msg.text}`)
+    void flushInjectQueue()
+  }
+
   // ---- Typed event subscriptions -----------------------------------------
 
   client.on('message', (msg, meta) => {
-    pushNotification(msg.text, buildMessageMeta(msg, meta))
+    if (DELIVERY === 'tmux' && !meta.historical && TMUX_TARGET) {
+      injectTmuxTurn(TMUX_TARGET, msg)
+    } else {
+      pushNotification(msg.text, buildMessageMeta(msg, meta))
+    }
     process.stderr.write(
       `roost-irc[${NICK}]: <- ${msg.isDirect ? 'DM from' : `${msg.channel} <`}${msg.sender}> ${msg.text.length > 120 ? msg.text.slice(0, 117) + '...' : msg.text}${meta.buffered ? ` [BUFFERED x${meta.chunkCount}]` : ''}${meta.historical ? ' [HISTORY]' : ''}\n`,
     )

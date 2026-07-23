@@ -497,7 +497,7 @@ plumbing:
 
 1. `bin/roost-compact-hook` is wired as a PreCompact hook by
    `bin/roost spawn` *only when* `--steer-compact` is passed.
-   Long-running PM-class agents (project-manager, associate-pm) opt in;
+   Long-running PM-class agents (lead-pm, associate-pm) opt in;
    workers and reviewers don't (auto-compact is unlikely to fire
    in their lifetime — default behavior is fine). The hook carries
    a single-line, semicolon-separated directive constant near the

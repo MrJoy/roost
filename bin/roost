@@ -66,7 +66,7 @@ Commands:
 
 Quick start:
   roost init
-  roost spawn <project>-lead-pm \\
+  roost spawn <project>-pm \\
     --agent lead-pm \\
     --channels '#<project>-leads' \\
     --steer-compact --cache-ttl 1h \\
@@ -292,11 +292,17 @@ Agent class guidance:
   worth thinking about — claude-code's native cache behavior applies.
 
 Provider selection:
-  Provider resolution order: explicit --harness, --model, or --agent
-  always wins and skips the registry entirely. --provider resolves that
-  named provider directly. --role resolves through the roles map in
-  .orchestrator/config.json. No --provider and no --role means no
-  registry: today's behavior, claude harness with the opus default.
+  --agent supplies a persona and permission mode, and composes with --role
+  or --provider: paired with either, the registry still resolves and the
+  gate and audit below still run. A bare --agent with no --role and no
+  --provider carries no provider-axis flag, so it skips the registry
+  entirely, same as today. --provider resolves that named provider
+  directly. --role resolves through the roles map in
+  .orchestrator/config.json, still recording authorship and running the
+  cross-org gate even when an explicit --model/--harness overrides the
+  resolved launch target (the override must share the role's vendor org).
+  No --provider and no --role means no registry: today's behavior, claude
+  harness with the opus default.
 
   Cross-org rule: a review role's provider org must differ from the recorded author org.
   Roles are declared in .orchestrator/config.json .roles. A role
@@ -318,6 +324,14 @@ Provider selection:
   the gate cannot run. When one targets an issue that already has a recorded
   author, roost notes it and appends a #bypass audit record. It does not block:
   explicit flags win.
+
+  Where the gate and audit fire: live on --role/--provider and the migrated
+  automation templates. A no-op in a single-org registry (nothing cross-org
+  to enforce; it engages on its own when a second org's provider is added).
+  A hand-typed bare --agent spawn is fully inert: no role, nothing gated,
+  no registry read. A bare --model/--harness spawn cannot run the gate
+  either, since it carries no role. It still appends a #bypass audit when it
+  targets an issue that already has a recorded author, as noted above.
 
   Registry reads use jq. The jq check only fires when --provider or
   --role is set. A bare spawn never needs jq on PATH.
@@ -451,11 +465,15 @@ _init_config_json() {
     # Single-repo: project + repo + the static plugin slices (operator-set,
     # not DM-mutated). Dynamic slices (github-prs / github-issues) live in the
     # local overlay; their plugins.<name> key still enables them via union merge.
-    printf '{\n  "project": "%s",\n  "repo": "%s",\n  "agent_logins": %s,\n  "providers": {},\n  "roles": {},\n  "plugins": {\n    "github-new-issues": { "watched": [] },\n    "github-new-prs": { "watched": [] },\n    "github-commits": { "watched": [] }\n  }\n}\n' \
+    # providers/roles are seeded with a default Claude provider and worker/reviewer
+    # roles so --role worker / --role reviewer resolve to today's Claude default in
+    # a fresh project. Add a second-org provider and a reviewer candidate from it
+    # to turn on real cross-org enforcement.
+    printf '{\n  "project": "%s",\n  "repo": "%s",\n  "agent_logins": %s,\n  "providers": {\n    "claude-default": { "harness": "claude", "model": "opus" }\n  },\n  "roles": {\n    "worker": { "candidates": ["claude-default"], "author": true },\n    "reviewer": { "candidates": ["claude-default"], "review": true }\n  },\n  "plugins": {\n    "github-new-issues": { "watched": [] },\n    "github-new-prs": { "watched": [] },\n    "github-commits": { "watched": [] }\n  }\n}\n' \
       "$1" "$2" "$3"
   else
     # Multi-repo: no top-level repo; operator adds plugin keys + per-entry repos.
-    printf '{\n  "project": "%s",\n  "agent_logins": %s,\n  "providers": {},\n  "roles": {},\n  "plugins": {}\n}\n' \
+    printf '{\n  "project": "%s",\n  "agent_logins": %s,\n  "providers": {\n    "claude-default": { "harness": "claude", "model": "opus" }\n  },\n  "roles": {\n    "worker": { "candidates": ["claude-default"], "author": true },\n    "reviewer": { "candidates": ["claude-default"], "review": true }\n  },\n  "plugins": {}\n}\n' \
       "$1" "$3"
   fi
 }
@@ -687,7 +705,7 @@ cmd_init() {
     printf '\nNext step:\n'
   fi
   printf '%s\n' \
-    "  roost spawn ${project}-lead-pm \\" \
+    "  roost spawn ${project}-pm \\" \
     "    --agent lead-pm \\" \
     "    --channels '#${project}-leads' \\" \
     "    --steer-compact --cache-ttl 1h \\" \
@@ -838,12 +856,12 @@ cmd_spawn() {
   if [ -z "${issue_key}" ]; then
     issue_key="$(printf '%s' "${channels}" | grep -oE '#[a-zA-Z0-9_-]+-issue-[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)"
   fi
-  # Registry resolution only runs when --provider/--role select it, and only
-  # when no explicit --harness/--model already pinned the launch target (those
-  # win outright and skip the registry read entirely). require_jq is called
-  # here, not unconditionally, so a bare spawn never needs jq on PATH.
-  if [ "${model_explicit}" -eq 0 ] && [ "${harness_explicit}" -eq 0 ] && [ -z "${agent}" ] \
-      && { [ -n "${provider}" ] || [ -n "${role}" ]; }; then
+  # Registry resolution runs whenever --provider/--role select it. An explicit
+  # --harness/--model still wins over the resolved value (see the assignment
+  # below), but --role always resolves first so author-recording and the gate
+  # run even under an override. require_jq is called here, not unconditionally,
+  # so a bare spawn never needs jq on PATH.
+  if [ -n "${provider}" ] || [ -n "${role}" ]; then
     require_jq || return 1
     # shellcheck source=bin/roost-registry.sh disable=SC1091
     source "$(dirname "${ROOST_BIN}")/roost-registry.sh"
@@ -882,12 +900,26 @@ cmd_spawn() {
       registry_provider_fields "${provider}"; _registry_rc=$?
       # Explicit launch target: no role, so the gate never ran. Audit if this
       # touches a known issue with a recorded author.
-      [ "${_registry_rc}" -eq 0 ] && bypass_audit "${issue_key}" "${RESOLVED_PROVIDER_NAME}" "${RESOLVED_ORG}"
+      [ "${_registry_rc}" -eq 0 ] && bypass_audit "${issue_key}" "${RESOLVED_PROVIDER_NAME}" "${RESOLVED_ORG}" "${RESOLVED_MODEL}" "${RESOLVED_HARNESS}"
     elif registry_role_is_review "${role}"; then
       policy_gate_reviewer "${issue_key}" "${role}" "${allow_same_org}" "${allow_same_org_reason}"
       _registry_rc=$?
     else
       registry_resolve_role "${role}"; _registry_rc=$?
+    fi
+    # Org-coherence: an explicit --model on a --role spawn must be from the same
+    # vendor org the role resolved to. Picking a role from one org and a model
+    # from another is incoherent. In a single-org deployment the vendor orgs
+    # always match, so this never triggers there. Runs BEFORE the author-record
+    # block below: a rejected cross-org override must not leave a durable
+    # author record on disk, so the gate has to reject first.
+    if [ "${_registry_rc}" -eq 0 ] && [ "${model_explicit}" -eq 1 ] && [ -n "${role}" ]; then
+      local _override_org; _override_org="$(registry_vendor_org "${model}")"
+      if [ -n "${_override_org}" ] && [ "${_override_org}" != "${RESOLVED_ORG}" ]; then
+        cd "${_registry_prev_pwd}" || return 1
+        echo "error: --model '${model}' (org '${_override_org}') differs from role '${role}' org '${RESOLVED_ORG}'. Pick a model from the role's org, or drop --role." >&2
+        return 1
+      fi
     fi
     # Record the resolved author-org for any author role (config "author": true
     # or the built-in "worker" default), not just the literal name "worker".
@@ -901,20 +933,36 @@ cmd_spawn() {
     fi
     cd "${_registry_prev_pwd}" || return 1
     [ "${_registry_rc}" -eq 0 ] || return 1
-    harness="${RESOLVED_HARNESS}"
-    model="${RESOLVED_MODEL}"
+    # Model selection precedence: explicit --harness/--model win over the role's
+    # resolved values, but the role still drove author-recording and the gate
+    # above. Only adopt the resolved value when the operator did not pin one.
+    [ "${harness_explicit}" -eq 0 ] && harness="${RESOLVED_HARNESS}"
+    if [ "${model_explicit}" -eq 0 ]; then
+      # With --agent on the Claude harness, leave the model empty so claude reads
+      # permissionMode: and the pinned model natively from the agent frontmatter.
+      # This keeps the launch byte-identical to a bare --agent spawn while the
+      # role still drove author-recording and the gate above. On a non-Claude
+      # harness (Codex has no frontmatter) the resolved model is adopted so the
+      # provider selection actually reaches the launch.
+      if [ -n "${agent}" ] && [ "${harness}" = "claude" ]; then
+        model=""
+      else
+        model="${RESOLVED_MODEL}"
+      fi
+    fi
     # base_url_env / auth_env / org are consumed by later provider-wiring work.
   fi
   if [ -z "${model}" ] && [ -z "${agent}" ]; then
     model="opus"
   fi
-  # Bypass audit for explicit --model/--harness (the --provider path is audited
-  # inside the registry block). These flags skip the registry entirely, so this
-  # engages jq only when .orchestrator/provider-assignments.json already exists,
-  # preserving the "a bare spawn never needs jq" invariant. --agent is excluded:
-  # its model comes from the agent frontmatter, a separate path.
+  # Bypass audit for explicit --model/--harness with neither --provider nor
+  # --role set (those two are audited, or org-gated, inside the registry block
+  # above). This engages jq only when .orchestrator/provider-assignments.json
+  # already exists, preserving the "a bare spawn never needs jq" invariant.
+  # --agent is excluded: its model comes from the agent frontmatter, a
+  # separate path.
   if { [ "${model_explicit}" -eq 1 ] || [ "${harness_explicit}" -eq 1 ]; } \
-      && [ -z "${provider}" ] && [ -z "${agent}" ] && [ -n "${issue_key}" ]; then
+      && [ -z "${provider}" ] && [ -z "${role}" ] && [ -z "${agent}" ] && [ -n "${issue_key}" ]; then
     local _audit_prev_pwd; _audit_prev_pwd="$(pwd)"
     cd "${cwd}" || return 1
     if [ -f ".orchestrator/provider-assignments.json" ]; then
@@ -923,7 +971,7 @@ cmd_spawn() {
         source "$(dirname "${ROOST_BIN}")/roost-registry.sh"
         local _audit_org; _audit_org="$(registry_vendor_org "${model}")"
         [ -n "${_audit_org}" ] || _audit_org="unknown"
-        bypass_audit "${issue_key}" "" "${_audit_org}"
+        bypass_audit "${issue_key}" "" "${_audit_org}" "${model}" "${harness}"
       else
         echo "  note: issue ${issue_key} has .orchestrator state but jq is absent; skipping #bypass audit." >&2
       fi
@@ -1138,6 +1186,7 @@ cmd_spawn() {
   {
   REQ_MODEL="${model}"
   REQ_AGENT="${agent}"
+  REQ_AGENT_PATH="${_agent_path}"
   REQ_PERMISSION_MODE="${permission_mode}"
   REQ_HOOK_PERM_MODE="${hook_perm_mode}"
   REQ_CHANNELS="${channels}"

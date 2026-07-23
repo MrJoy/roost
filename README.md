@@ -5,7 +5,7 @@
 # roost
 
 Roost lets you run your own team of Claude Code agents on a real project. A
-project-manager agent picks up issues from a GitHub milestone and spawns workers and
+lead-pm agent picks up issues from a GitHub milestone and spawns workers and
 reviewers to drive each one through PR; the team coordinates over a local IRC
 server you can join from any client. You watch the work happen and step in
 when something needs human judgment.
@@ -26,7 +26,7 @@ on a shared host or expose port 6667 beyond localhost.
 
 ## Running a milestone
 
-Roost is built for parallel milestone work. Spawn one agent — project-manager —
+Roost is built for parallel milestone work. Spawn one agent — lead-pm —
 and hand it a GitHub milestone. It creates a channel per issue, spawns
 workers and reviewers into them, and coordinates with the dispatcher to
 route CI and PR events back in. You watch and intervene from weechat on
@@ -39,7 +39,7 @@ Bootstrap your project, then kick off the PM:
 cd ~/Dev/myproject
 roost init --repo Owner/myproject   # writes .orchestrator/{config.json, config.local.json, .gitignore} + copies role prompts
 roost spawn myproject-pm \
-  --agent project-manager \
+  --agent lead-pm \
   --channels '#myproject-leads' \
   --steer-compact --cache-ttl 1h \
   --ask-irc '#myproject-leads' --ask-target <your-nick> \
@@ -48,7 +48,7 @@ roost spawn myproject-pm \
 
 See [`docs/ROOST-IN-PRACTICE.md`](docs/ROOST-IN-PRACTICE.md) for the end-to-end walkthrough.
 
-Roost ships more agents than project-manager — each is a `roost spawn <nick> --agent <name>`
+Roost ships more agents than lead-pm — each is a `roost spawn <nick> --agent <name>`
 target. `roost agents` lists the ones installed in your project; `roost agents
 --all` also shows what roost ships but you haven't installed yet, and how to
 pull them in.
@@ -212,7 +212,10 @@ or `{"candidates": [...], "review": true}`. Fill these in to let `roost
 spawn --provider NAME` or `roost spawn --role NAME` pick harness, model,
 and backend for you.
 Provider resolution order: explicit `--harness`, `--model`, or `--agent`
-always wins and skips the registry entirely. `--provider` resolves that
+wins over the registry's resolved launch target. Paired with `--role` or
+`--provider`, the registry still resolves and records authorship. A review
+role still gates the launch. On their own, with no `--role` and no
+`--provider`, they skip the registry entirely. `--provider` resolves that
 named provider directly. `--role` resolves through the roles map in
 `.orchestrator/config.json`. No `--provider` and no `--role` means no
 registry: today's behavior, claude harness with the opus default. The
@@ -237,6 +240,15 @@ Explicit launch targets (`--provider`, `--model`, `--harness`) carry no
 role, so the gate cannot run. When one targets an issue that already has
 a recorded author, roost notes it and appends a `#bypass` audit record.
 It does not block: explicit flags win.
+
+Where this fires: live on `--role`/`--provider` and the migrated automation
+templates. A no-op in a single-org registry, since there's no cross-org
+mix to catch; it starts working on its own once a second org's provider
+gets added. A hand-typed bare `--agent` spawn is fully inert: no role to
+gate, no registry read. A bare `--model`/`--harness` spawn can't run the
+gate either, since it carries no role. It still appends a `#bypass` audit
+when it targets an issue that already has a recorded author, as noted
+above.
 
 Migrating from a plain candidate list: a custom-named review role (for
 example `auditor`) must declare `"review": true` to be gated. A

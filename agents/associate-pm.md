@@ -93,28 +93,33 @@ On confirmation, for each issue N:
    Then spawn BOTH — the worker (PM's chosen model/effort) and the reviewer (model + effort pinned in its agent file) — into the issue channel:
    ```
    roost spawn <worker-nick> \
+     --role worker \
      --model <model> \
      --cache-ttl 1h \
      --channels '<issue-channel>' \
      --cwd <worktree-path> \
+     --issue <N> \
      --prompt '/worker <project> <N> <owner>/<repo> <branch> <human-nick> <worker-nick> <issue-channel>' \
      -- --effort <effort>
 
-   roost spawn <reviewer-nick> --agent reviewer \
+   roost spawn <reviewer-nick> \
+     --agent reviewer \
+     --role reviewer \
      --cache-ttl 1h \
      --channels '<issue-channel>' \
      --cwd <worktree-path> \
+     --issue <N> \
      --prompt 'issue=<N> milestone=<milestone> human=<human-nick> gh-login=<gh-login>'
    ```
-   (No `--model`/`--effort` on the reviewer spawn — `--model` is incompatible with `--agent`, and `reviewer.md`'s frontmatter already pins model + effort. The worker spawn keeps them because it doesn't use `--agent`; its model/effort are the PM's per-issue call. The reviewer shares the worker's worktree via `--cwd` — it reads the branch there but never edits.) If the PM named a cross-issue contract for this issue, append it to the reviewer's prompt after the required tokens (e.g. `... gh-login=<gh-login> consumes-contract-from=#<M>`) so it reviews with that lens.
+   (`--role worker` records the issue's author org, and the worker's model/effort stay the PM's per-issue call. `--agent reviewer` keeps the reviewer persona and its `permissionMode`; `--role reviewer` runs the cross-org gate and selects the reviewer's provider. `reviewer.md`'s frontmatter pins model + effort, so in a single-org registry the reviewer launch is unchanged. The reviewer shares the worker's worktree via `--cwd`. It reads the branch there but never edits.) If the PM named a cross-issue contract for this issue, append it to the reviewer's prompt after the required tokens (e.g. `... gh-login=<gh-login> consumes-contract-from=#<M>`) so it reviews with that lens.
 
-   If the project's `.orchestrator/config.json` has a `providers`/`roles`
-   registry filled in, worker and reviewer spawns may resolve to a
-   non-Claude harness via `--provider`/`--role` instead of the Claude
-   defaults shown above. A role can declare `"author": true` or
-   `"review": true`; the built-in names `worker` and `reviewer` default
-   to those respectively even without declaring them. Spawning a review
-   role through the registry also runs a cross-org gate, and this gate
+   `roost init` seeds a `claude-default` provider and `worker`/`reviewer`
+   roles, so the `--role` templates above resolve to today's Claude default
+   in a fresh project. To run a worker or reviewer on a non-Claude harness,
+   add that provider to `.orchestrator/config.json` and list it in that
+   role's candidates. A role can declare `"author": true` or `"review": true`; the
+   built-in names `worker` and `reviewer` default to those respectively.
+   Spawning a review role through the registry runs a cross-org gate that
    can hard-fail the spawn.
    Cross-org rule: a review role's provider org must differ from the recorded author org.
    The spawn fails when every candidate is same-org. `--allow-same-org "<reason>"` overrides the
