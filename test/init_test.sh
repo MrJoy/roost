@@ -514,15 +514,18 @@ fi
 cd - >/dev/null
 teardown
 
-# --- providers/roles: scaffolded as empty objects ---
+# --- providers/roles: seeded with a default Claude provider + worker/reviewer roles ---
 
 setup ""
 cd "$TDIR"
 roost_init --repo "TestOwner/myproject" >/dev/null 2>&1
-if jq -e 'has("providers") and has("roles")' "${TDIR}/.orchestrator/config.json" >/dev/null 2>&1; then
-  ok "init scaffolds providers + roles keys"
+cfg="${TDIR}/.orchestrator/config.json"
+if jq -e '.providers["claude-default"].harness == "claude" and .providers["claude-default"].model == "opus"' "$cfg" >/dev/null 2>&1 \
+    && jq -e '.roles.worker.author == true and (.roles.worker.candidates | index("claude-default"))' "$cfg" >/dev/null 2>&1 \
+    && jq -e '.roles.reviewer.review == true and (.roles.reviewer.candidates | index("claude-default"))' "$cfg" >/dev/null 2>&1; then
+  ok "init seeds claude-default provider + worker/reviewer roles"
 else
-  fail "init scaffolds providers + roles keys"
+  fail "init seeds claude-default provider + worker/reviewer roles"
 fi
 cd - >/dev/null
 teardown

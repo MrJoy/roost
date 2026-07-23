@@ -453,11 +453,15 @@ _init_config_json() {
     # Single-repo: project + repo + the static plugin slices (operator-set,
     # not DM-mutated). Dynamic slices (github-prs / github-issues) live in the
     # local overlay; their plugins.<name> key still enables them via union merge.
-    printf '{\n  "project": "%s",\n  "repo": "%s",\n  "agent_logins": %s,\n  "providers": {},\n  "roles": {},\n  "plugins": {\n    "github-new-issues": { "watched": [] },\n    "github-new-prs": { "watched": [] },\n    "github-commits": { "watched": [] }\n  }\n}\n' \
+    # providers/roles are seeded with a default Claude provider and worker/reviewer
+    # roles so --role worker / --role reviewer resolve to today's Claude default in
+    # a fresh project. Add a second-org provider and a reviewer candidate from it
+    # to turn on real cross-org enforcement.
+    printf '{\n  "project": "%s",\n  "repo": "%s",\n  "agent_logins": %s,\n  "providers": {\n    "claude-default": { "harness": "claude", "model": "opus" }\n  },\n  "roles": {\n    "worker": { "candidates": ["claude-default"], "author": true },\n    "reviewer": { "candidates": ["claude-default"], "review": true }\n  },\n  "plugins": {\n    "github-new-issues": { "watched": [] },\n    "github-new-prs": { "watched": [] },\n    "github-commits": { "watched": [] }\n  }\n}\n' \
       "$1" "$2" "$3"
   else
     # Multi-repo: no top-level repo; operator adds plugin keys + per-entry repos.
-    printf '{\n  "project": "%s",\n  "agent_logins": %s,\n  "providers": {},\n  "roles": {},\n  "plugins": {}\n}\n' \
+    printf '{\n  "project": "%s",\n  "agent_logins": %s,\n  "providers": {\n    "claude-default": { "harness": "claude", "model": "opus" }\n  },\n  "roles": {\n    "worker": { "candidates": ["claude-default"], "author": true },\n    "reviewer": { "candidates": ["claude-default"], "review": true }\n  },\n  "plugins": {}\n}\n' \
       "$1" "$3"
   fi
 }
