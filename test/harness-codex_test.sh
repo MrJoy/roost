@@ -106,10 +106,12 @@ fi
 [ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
 
 # -- Test: --agent resolves the persona .md and prepends its body (frontmatter stripped) --
+# The agent lives in a subdirectory to prove the adapter uses bin/roost's recursive
+# resolution, not a flat top-level lookup that would silently drop this persona.
 setup
-mkdir -p "$TDIR/.orchestrator" "$TDIR/.claude/agents"
+mkdir -p "$TDIR/.orchestrator" "$TDIR/.claude/agents/reviewers"
 printf '{"project":"p","providers":{"alt":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{}}' > "$TDIR/.orchestrator/config.json"
-cat > "$TDIR/.claude/agents/myrole.md" <<'EOF'
+cat > "$TDIR/.claude/agents/reviewers/myrole.md" <<'EOF'
 ---
 name: myrole
 permissionMode: auto

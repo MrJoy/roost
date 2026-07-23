@@ -94,33 +94,21 @@ harness_assemble() {
   if [ -n "${REQ_PROMPT_FILE}" ]; then
     local _preamble=""
 
-    # Agent persona. Resolve the agent definition the same way the Claude harness
-    # relies on Claude Code to: the project's .claude/agents, then the operator's
-    # ~/.claude/agents, then the plugin's own shipped agents. Strip the leading
-    # YAML frontmatter and inline the body as the session's system prompt.
-    if [ -n "${REQ_AGENT}" ]; then
-      local _agent_file=""
-      local _cand
-      for _cand in \
-        "${REQ_CWD}/.claude/agents/${REQ_AGENT}.md" \
-        "${HOME}/.claude/agents/${REQ_AGENT}.md" \
-        "${REQ_ROOST_DIR}/agents/${REQ_AGENT}.md"; do
-        if [ -f "${_cand}" ]; then _agent_file="${_cand}"; break; fi
-      done
-      if [ -n "${_agent_file}" ]; then
-        local _persona
-        # Drop a leading --- ... --- frontmatter block; pass everything else through.
-        _persona="$(awk '
-          NR==1 && $0=="---" { infm=1; next }
-          infm==1 && $0=="---" { infm=0; started=1; next }
-          infm==1 { next }
-          { print }
-        ' "${_agent_file}")"
-        if [ -n "${_persona}" ]; then
-          _preamble="${_persona}"$'\n\n'
-        fi
-      else
-        echo "  warning: --agent ${REQ_AGENT}: no agent definition found under .claude/agents or the plugin agents tree; launching codex without a persona" >&2
+    # Agent persona. Codex has no --agent, so inline the definition's body as the
+    # session's system prompt. bin/roost already resolved the agent file with the
+    # same recursive search the Claude harness relies on and aborts the spawn if
+    # it is missing, so REQ_AGENT_PATH is an existing file whenever it is set.
+    # Strip the leading YAML frontmatter; keep the body.
+    if [ -n "${REQ_AGENT_PATH}" ]; then
+      local _persona
+      _persona="$(awk '
+        NR==1 && $0=="---" { infm=1; next }
+        infm==1 && $0=="---" { infm=0; next }
+        infm==1 { next }
+        { print }
+      ' "${REQ_AGENT_PATH}")"
+      if [ -n "${_persona}" ]; then
+        _preamble="${_persona}"$'\n\n'
       fi
     fi
 

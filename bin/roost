@@ -1186,7 +1186,7 @@ cmd_spawn() {
   {
   REQ_MODEL="${model}"
   REQ_AGENT="${agent}"
-  REQ_CWD="${cwd}"
+  REQ_AGENT_PATH="${_agent_path}"
   REQ_PERMISSION_MODE="${permission_mode}"
   REQ_HOOK_PERM_MODE="${hook_perm_mode}"
   REQ_CHANNELS="${channels}"
