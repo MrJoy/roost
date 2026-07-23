@@ -28,6 +28,7 @@ teardown() {
   tmux kill-session -t "roost-p-reviewer-8" 2>/dev/null || true
   tmux kill-session -t "roost-p-worker-9" 2>/dev/null || true
   tmux kill-session -t "roost-p-reviewer-9" 2>/dev/null || true
+  tmux kill-session -t "roost-p-reviewer-9b" 2>/dev/null || true
   trap - EXIT
   TDIR=""
 }
@@ -104,16 +105,19 @@ mkdir -p "$TDIR/.orchestrator"
 printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"worker":"c1","reviewer":["c2"]}}' > "$TDIR/.orchestrator/config.json"
 "${ROOST_BIN}" spawn p-worker-9 --role worker --issue 9 --cwd "$TDIR" >/dev/null 2>&1 || true
 out="$("${ROOST_BIN}" spawn p-reviewer-9 --role reviewer --issue 9 --allow-same-org "only reviewer available" --cwd "$TDIR" 2>&1 || true)"
+"${ROOST_BIN}" spawn p-reviewer-9b --role reviewer --issue 9 --allow-same-org "second pass" --cwd "$TDIR" >/dev/null 2>&1 || true
 asn="$TDIR/.orchestrator/provider-assignments.json"
-# The override is recorded under a distinct "9#override" key, and the worker's
-# author entry at "9" must survive it (provider c1, org anthropic, override
-# false) so a later re-review still reads the real author, not this reviewer.
+# The override array under "9#override" preserves every override (newest
+# appended); the worker's author entry at "9" survives untouched so a later
+# re-review still reads the real author.
 if echo "$out" | grep -qi "override" \
-    && jq -e '.["9#override"].override == true and .["9#override"].reason == "only reviewer available"' "$asn" >/dev/null \
+    && jq -e '.["9#override"] | type == "array" and length == 2' "$asn" >/dev/null \
+    && jq -e '.["9#override"][0].kind == "reviewer-override" and .["9#override"][0].reason == "only reviewer available"' "$asn" >/dev/null \
+    && jq -e '.["9#override"][1].reason == "second pass"' "$asn" >/dev/null \
     && jq -e '.["9"].role == "worker" and .["9"].provider == "c1" and .["9"].override == false' "$asn" >/dev/null; then
-  ok "--allow-same-org records override under a distinct key; worker author survives"
+  ok "--allow-same-org appends override records; worker author survives"
 else
-  fail "--allow-same-org records override under a distinct key; worker author survives" "out=$out asn=$(cat "$asn" 2>/dev/null)"
+  fail "--allow-same-org appends override records; worker author survives" "out=$out asn=$(cat "$asn" 2>/dev/null)"
 fi
 teardown
 

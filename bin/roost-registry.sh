@@ -120,6 +120,22 @@ assignment_record() {
      "$f" > "$tmp" && mv "$tmp" "$f"
 }
 
+# assignment_append <key> <kind> <provider> <org> [reason]
+# Appends a record to the JSON array at .[$key], creating the array if absent.
+# Used for the append-safe audit trails (#override, #bypass) so a second event
+# for the same issue never clobbers the first. Atomic tmp+mv, same discipline
+# as assignment_record.
+assignment_append() {
+  local key="$1" kind="$2" provider="$3" org="$4" reason="${5:-}"
+  local f; f="$(_assignment_path)"
+  mkdir -p "$(dirname "$f")"
+  [ -f "$f" ] || printf '{}' > "$f"
+  local tmp; tmp="$(mktemp "${f}.XXXXXX")"
+  jq --arg k "$key" --arg kind "$kind" --arg p "$provider" --arg o "$org" --arg reason "$reason" \
+     '.[$k] = ((.[$k] // []) + [{kind:$kind, provider:$p, org:$o, reason:$reason}])' \
+     "$f" > "$tmp" && mv "$tmp" "$f"
+}
+
 # assignment_lookup <issue> -> echoes the recorded org, or empty if none.
 assignment_lookup() {
   local issue="$1" f; f="$(_assignment_path)"
@@ -160,11 +176,12 @@ policy_gate_reviewer() {
   if [ "$allow" = "1" ]; then
     registry_provider_fields "$top" || return 1
     echo "  WARNING: cross-org gate OVERRIDE. Reviewer '${top}' is same org ('${author_org}') as the author. Reason: ${reason}" >&2
-    # Record the override under a distinct key so it never clobbers the worker's
-    # author entry at "$issue". assignment_lookup reads the author org from
-    # "$issue", so a later re-review still sees the real author, not this
-    # reviewer. The override entry is auditable on its own key.
-    assignment_record "${issue}#override" "reviewer-override" "$top" "$RESOLVED_ORG" true "$reason"
+    # Append the override to a distinct key's array so it never clobbers the
+    # worker's author entry at "$issue", and a second override for the same
+    # issue never clobbers the first. assignment_lookup reads the author org
+    # from "$issue", so a later re-review still sees the real author, not
+    # this reviewer. The override trail is auditable on its own key.
+    assignment_append "${issue}#override" "reviewer-override" "$top" "$RESOLVED_ORG" "$reason"
     return 0
   fi
   echo "error: cross-org review rule. Every reviewer candidate for issue ${issue} is same org ('${author_org}') as the author. Pass --allow-same-org \"<reason>\" to override." >&2
