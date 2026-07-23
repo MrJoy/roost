@@ -5,12 +5,13 @@
 set -uo pipefail
 
 ROOST_BIN="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )/bin/roost"
+REG="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )/bin/roost-registry.sh"
 PASS=0
 FAIL=0
 TDIR=""
 
 ok()   { echo "PASS: $1"; PASS=$((PASS+1)); }
-fail() { echo "FAIL: $1 ${2:+— $2}"; FAIL=$((FAIL+1)); }
+fail() { echo "FAIL: $1 ${2:+- $2}"; FAIL=$((FAIL+1)); }
 
 setup() {
   TDIR="$(mktemp -d /tmp/roost-registry-test-XXXXXXXX)"
@@ -24,23 +25,49 @@ teardown() {
   TDIR=""
 }
 
-# -- Test: --role without jq on PATH errors clearly --
+# Build a PATH that mirrors the real one but excludes jq, so require_jq's
+# `command -v jq` genuinely fails regardless of where jq is installed. Dropping
+# a directory is not enough: in CI jq lives in /usr/bin alongside coreutils, so
+# we symlink every executable EXCEPT jq into a scratch dir and point PATH there.
+# Mirrors the neutralize-PATH technique the signet suite uses for signet-eval.
+make_jqless_path() {
+  local mirror="${TDIR}/.nojq-bin"
+  mkdir -p "$mirror"
+  local d f name
+  IFS=':' read -ra _dirs <<< "$PATH"
+  for d in "${_dirs[@]}"; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      [ -e "$f" ] || continue
+      name="$(basename "$f")"
+      [ "$name" = "jq" ] && continue
+      [ -e "${mirror}/${name}" ] && continue   # first match wins, mirrors PATH order
+      ln -s "$f" "${mirror}/${name}" 2>/dev/null || true
+    done
+  done
+  printf '%s' "$mirror"
+}
+
+# -- Test: --role with jq absent errors clearly, naming jq --
 setup
 mkdir -p "$TDIR/.orchestrator"
 printf '{"project":"p","roles":{"worker":"claude-opus"},"providers":{"claude-opus":{"harness":"claude","model":"opus"}}}' > "$TDIR/.orchestrator/config.json"
-err="$(PATH="/usr/bin:/bin" "${ROOST_BIN}" spawn testnick --role worker --cwd "$TDIR" 2>&1)"; ec=$?
-# When jq is genuinely absent this must name jq. When jq exists in /usr/bin it resolves: accept either the jq error OR a successful resolution banner.
-if { [ "$ec" -ne 0 ] && echo "$err" | grep -qi "jq"; } || echo "$err" | grep -q "harness: claude"; then
-  ok "registry spawn either resolves or errors naming jq"
+nojq="$(make_jqless_path)"
+err="$(PATH="$nojq" "${ROOST_BIN}" spawn testnick --role worker --cwd "$TDIR" 2>&1)"; ec=$?
+# jq is genuinely absent, so the registry path must fail closed and name jq.
+if [ "$ec" -ne 0 ] && echo "$err" | grep -qi "requires jq"; then
+  ok "registry spawn with jq absent errors naming jq"
 else
-  fail "registry spawn either resolves or errors naming jq" "ec=$ec err=$err"
+  fail "registry spawn with jq absent errors naming jq" "ec=$ec err=$err"
 fi
 teardown
 
-# -- Test: bare spawn (no registry) does not require jq --
+# -- Test: bare spawn (no registry) does not require jq even when jq is absent --
 setup
-out="$(PATH="/usr/bin:/bin" "${ROOST_BIN}" spawn testnick --cwd "$TDIR" 2>&1 || true)"
-if ! echo "$out" | grep -qi "jq.*not found\|requires jq"; then
+nojq="$(make_jqless_path)"
+out="$(PATH="$nojq" "${ROOST_BIN}" spawn testnick --cwd "$TDIR" 2>&1 || true)"
+# The bare path never touches the registry, so it must not complain about jq.
+if ! echo "$out" | grep -qi "requires jq\|jq.*not found"; then
   ok "bare spawn does not require jq"
 else
   fail "bare spawn does not require jq" "out=$out"
@@ -135,6 +162,69 @@ else
   fail "provider base_url_env/auth_env flow into tmux env" "out=$out env=$(cat "$data_dir/tmux-env.txt" 2>/dev/null)"
 fi
 [ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
+
+# -- Test: object-form role unwraps .candidates (array) --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"a":{"harness":"claude","model":"opus"},"b":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"auditor":{"candidates":["a","b"],"review":true}}}' > "$TDIR/.orchestrator/config.json"
+out="$(cd "$TDIR" && source "$REG" && registry_role_candidates auditor)"
+if [ "$out" = "$(printf 'a\nb')" ]; then
+  ok "object-form role unwraps .candidates array in order"
+else
+  fail "object-form role unwraps .candidates array in order" "out=$out"
+fi
+teardown
+
+# -- Test: object-form role with a string .candidates --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"a":{"harness":"claude","model":"opus"}},"roles":{"builder":{"candidates":"a","author":true}}}' > "$TDIR/.orchestrator/config.json"
+out="$(cd "$TDIR" && source "$REG" && registry_role_candidates builder)"
+if [ "$out" = "a" ]; then
+  ok "object-form role unwraps a string .candidates"
+else
+  fail "object-form role unwraps a string .candidates" "out=$out"
+fi
+teardown
+
+# -- Test: object with no candidates resolves to an empty set --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{},"roles":{"empty":{"review":true}}}' > "$TDIR/.orchestrator/config.json"
+out="$(cd "$TDIR" && source "$REG" && registry_role_candidates empty)"
+if [ -z "$out" ]; then
+  ok "object without candidates yields an empty candidate list"
+else
+  fail "object without candidates yields an empty candidate list" "out=$out"
+fi
+teardown
+
+# -- Test: built-in name defaults apply in bare form --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"a":{"harness":"claude","model":"opus"}},"roles":{"worker":"a","reviewer":["a"],"auditor":["a"]}}' > "$TDIR/.orchestrator/config.json"
+cd "$TDIR" && source "$REG"
+if registry_role_is_author worker && ! registry_role_is_review worker \
+   && registry_role_is_review reviewer && ! registry_role_is_author reviewer \
+   && ! registry_role_is_author auditor && ! registry_role_is_review auditor; then
+  ok "bare-form worker=author, reviewer=review, auditor=neither"
+else
+  fail "bare-form worker=author, reviewer=review, auditor=neither"
+fi
+cd / ; teardown
+
+# -- Test: object properties override the name default --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"a":{"harness":"claude","model":"opus"}},"roles":{"worker":{"candidates":["a"],"author":false},"auditor":{"candidates":["a"],"review":true,"author":true}}}' > "$TDIR/.orchestrator/config.json"
+cd "$TDIR" && source "$REG"
+if ! registry_role_is_author worker \
+   && registry_role_is_review auditor && registry_role_is_author auditor; then
+  ok "explicit author:false disables worker default; explicit props enable a custom role"
+else
+  fail "explicit author:false disables worker default; explicit props enable a custom role"
+fi
+cd / ; teardown
 
 echo ""
 echo "Results: ${PASS} passed, ${FAIL} failed"

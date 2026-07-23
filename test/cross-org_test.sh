@@ -10,7 +10,7 @@ FAIL=0
 TDIR=""
 
 ok()   { echo "PASS: $1"; PASS=$((PASS+1)); }
-fail() { echo "FAIL: $1 ${2:+— $2}"; FAIL=$((FAIL+1)); }
+fail() { echo "FAIL: $1 ${2:+- $2}"; FAIL=$((FAIL+1)); }
 
 setup() {
   TDIR="$(mktemp -d /tmp/roost-crossorg-test-XXXXXXXX)"
@@ -28,6 +28,19 @@ teardown() {
   tmux kill-session -t "roost-p-reviewer-8" 2>/dev/null || true
   tmux kill-session -t "roost-p-worker-9" 2>/dev/null || true
   tmux kill-session -t "roost-p-reviewer-9" 2>/dev/null || true
+  tmux kill-session -t "roost-p-reviewer-9b" 2>/dev/null || true
+  tmux kill-session -t "roost-p-builder-20" 2>/dev/null || true
+  tmux kill-session -t "roost-p-auditor-20" 2>/dev/null || true
+  tmux kill-session -t "roost-p-builder-21" 2>/dev/null || true
+  tmux kill-session -t "roost-p-scout-22" 2>/dev/null || true
+  tmux kill-session -t "roost-p-x-30" 2>/dev/null || true
+  tmux kill-session -t "roost-p-worker-30" 2>/dev/null || true
+  tmux kill-session -t "roost-p-x-31" 2>/dev/null || true
+  tmux kill-session -t "roost-p-worker-31" 2>/dev/null || true
+  tmux kill-session -t "roost-p-x-32a" 2>/dev/null || true
+  tmux kill-session -t "roost-p-x-32b" 2>/dev/null || true
+  tmux kill-session -t "roost-p-x-33" 2>/dev/null || true
+  tmux kill-session -t "roost-p-both-40" 2>/dev/null || true
   trap - EXIT
   TDIR=""
 }
@@ -104,11 +117,154 @@ mkdir -p "$TDIR/.orchestrator"
 printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"worker":"c1","reviewer":["c2"]}}' > "$TDIR/.orchestrator/config.json"
 "${ROOST_BIN}" spawn p-worker-9 --role worker --issue 9 --cwd "$TDIR" >/dev/null 2>&1 || true
 out="$("${ROOST_BIN}" spawn p-reviewer-9 --role reviewer --issue 9 --allow-same-org "only reviewer available" --cwd "$TDIR" 2>&1 || true)"
+"${ROOST_BIN}" spawn p-reviewer-9b --role reviewer --issue 9 --allow-same-org "second pass" --cwd "$TDIR" >/dev/null 2>&1 || true
+asn="$TDIR/.orchestrator/provider-assignments.json"
+# The override array under "9#override" preserves every override (newest
+# appended); the worker's author entry at "9" survives untouched so a later
+# re-review still reads the real author.
 if echo "$out" | grep -qi "override" \
-    && jq -e '.["9"].override == true and .["9"].reason == "only reviewer available"' "$TDIR/.orchestrator/provider-assignments.json" >/dev/null; then
-  ok "--allow-same-org proceeds and records override + reason"
+    && jq -e '.["9#override"] | type == "array" and length == 2' "$asn" >/dev/null \
+    && jq -e '.["9#override"][0].kind == "reviewer-override" and .["9#override"][0].reason == "only reviewer available"' "$asn" >/dev/null \
+    && jq -e '.["9#override"][1].reason == "second pass"' "$asn" >/dev/null \
+    && jq -e '.["9"].role == "worker" and .["9"].provider == "c1" and .["9"].override == false' "$asn" >/dev/null; then
+  ok "--allow-same-org appends override records; worker author survives"
 else
-  fail "--allow-same-org proceeds and records override + reason" "out=$out asn=$(cat "$TDIR/.orchestrator/provider-assignments.json" 2>/dev/null)"
+  fail "--allow-same-org appends override records; worker author survives" "out=$out asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test: a custom-named review role is gated (not just "reviewer") --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"builder":{"candidates":["c1"],"author":true},"auditor":{"candidates":["c1","c2"],"review":true}}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-builder-20 --role builder --issue 20 --cwd "$TDIR" >/dev/null 2>&1 || true
+err="$("${ROOST_BIN}" spawn p-auditor-20 --role auditor --issue 20 --cwd "$TDIR" 2>&1)"; ec=$?
+# author c1 is anthropic; auditor candidates c1,c2 are both anthropic -> gate hard-fails.
+if [ "$ec" -ne 0 ] && echo "$err" | grep -q "cross-org" && echo "$err" | grep -q "allow-same-org"; then
+  ok "custom-named review role 'auditor' is gated"
+else
+  fail "custom-named review role 'auditor' is gated" "ec=$ec err=$err"
+fi
+teardown
+
+# -- Test: a custom-named author role records authorship (not just "worker") --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"gpt":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"builder":{"candidates":["gpt"],"author":true}}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-builder-21 --role builder --issue 21 --cwd "$TDIR" >/dev/null 2>&1 || true
+if jq -e '.["21"].org == "openai" and .["21"].role == "builder"' "$TDIR/.orchestrator/provider-assignments.json" >/dev/null 2>&1; then
+  ok "custom-named author role 'builder' records author-org"
+else
+  fail "custom-named author role 'builder' records author-org" "$(cat "$TDIR/.orchestrator/provider-assignments.json" 2>/dev/null)"
+fi
+teardown
+
+# -- Test: a neutral role (neither author nor review) records nothing and is ungated --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"scout":["c1","c2"]}}' > "$TDIR/.orchestrator/config.json"
+out="$("${ROOST_BIN}" spawn p-scout-22 --role scout --issue 22 --cwd "$TDIR" 2>&1 || true)"
+asn="$TDIR/.orchestrator/provider-assignments.json"
+# scout resolves to its first candidate with no gate and writes no author record.
+if echo "$out" | grep -q "harness: claude" \
+    && ! { [ -f "$asn" ] && jq -e '.["22"]' "$asn" >/dev/null 2>&1; }; then
+  ok "neutral role 'scout' is ungated and records nothing"
+else
+  fail "neutral role 'scout' is ungated and records nothing" "out=$out asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test: --provider path for a known issue with a recorded author appends #bypass --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-worker-30 --role worker --issue 30 --cwd "$TDIR" >/dev/null 2>&1 || true
+out="$("${ROOST_BIN}" spawn p-x-30 --provider c2 --issue 30 --cwd "$TDIR" 2>&1 || true)"
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if echo "$out" | grep -qi "gate not evaluated" \
+    && jq -e '.["30#bypass"] | type == "array" and length == 1 and .[0].kind == "explicit-bypass" and .[0].provider == "c2"' "$asn" >/dev/null 2>&1; then
+  ok "--provider path for a known issue appends a #bypass audit record"
+else
+  fail "--provider path for a known issue appends a #bypass audit record" "out=$out asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test: explicit --model for a known issue appends #bypass --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-worker-31 --role worker --issue 31 --cwd "$TDIR" >/dev/null 2>&1 || true
+out="$("${ROOST_BIN}" spawn p-x-31 --model sonnet --issue 31 --cwd "$TDIR" 2>&1 || true)"
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if echo "$out" | grep -qi "gate not evaluated" \
+    && jq -e '.["31#bypass"][0].kind == "explicit-bypass" and .["31#bypass"][0].org == "anthropic"' "$asn" >/dev/null 2>&1; then
+  ok "explicit --model for a known issue appends a #bypass audit record"
+else
+  fail "explicit --model for a known issue appends a #bypass audit record" "out=$out asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test (NEGATIVE): fully-explicit worker+reviewer leaves no #bypass mark --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{}}' > "$TDIR/.orchestrator/config.json"
+# Worker spawned explicitly (--provider), so NO author is recorded; the later
+# explicit reviewer spawn therefore has no recorded author to trigger against.
+"${ROOST_BIN}" spawn p-x-32a --provider c1 --issue 32 --cwd "$TDIR" >/dev/null 2>&1 || true
+"${ROOST_BIN}" spawn p-x-32b --provider c2 --issue 32 --cwd "$TDIR" >/dev/null 2>&1 || true
+asn="$TDIR/.orchestrator/provider-assignments.json"
+# The audit is inherently limited: with no recorded author, there is nothing to
+# audit against, so no #bypass record exists. This pins that it does not
+# over-trigger on an unknown issue.
+if ! { [ -f "$asn" ] && jq -e '.["32#bypass"]' "$asn" >/dev/null 2>&1; } \
+    && ! { [ -f "$asn" ] && jq -e '.["32"]' "$asn" >/dev/null 2>&1; }; then
+  ok "fully-explicit worker+reviewer leaves no author and no #bypass mark"
+else
+  fail "fully-explicit worker+reviewer leaves no author and no #bypass mark" "asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test: --provider with no recorded author writes no #bypass --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c2":{"harness":"claude","model":"sonnet"}},"roles":{}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-x-33 --provider c2 --issue 33 --cwd "$TDIR" >/dev/null 2>&1 || true
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if ! { [ -f "$asn" ] && jq -e '.["33#bypass"]' "$asn" >/dev/null 2>&1; }; then
+  ok "--provider with no recorded author writes no #bypass"
+else
+  fail "--provider with no recorded author writes no #bypass" "asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+
+# -- Test: a role declaring both author and review fails fast --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"both":{"candidates":["c1"],"author":true,"review":true}}}' > "$TDIR/.orchestrator/config.json"
+err="$("${ROOST_BIN}" spawn p-both-40 --role both --issue 40 --cwd "$TDIR" 2>&1)"; ec=$?
+if [ "$ec" -ne 0 ] && echo "$err" | grep -q "role 'both' declares both author and review"; then
+  ok "role declaring both author and review fails fast"
+else
+  fail "role declaring both author and review fails fast" "ec=$ec err=$err"
+fi
+teardown
+
+# -- Test: name-default collision attributes the conflict to the right source --
+setup
+mkdir -p "$TDIR/.orchestrator"
+# A role named "worker" that declares review:true inherits author:true from its
+# name default. The error must say review was declared and author inherited,
+# and point at the "author: false" remedy, not claim both were declared.
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"worker":{"candidates":["c1"],"review":true}}}' > "$TDIR/.orchestrator/config.json"
+err="$("${ROOST_BIN}" spawn p-worker-41 --role worker --issue 41 --cwd "$TDIR" 2>&1)"; ec=$?
+if [ "$ec" -ne 0 ] \
+    && echo "$err" | grep -q "declares review and inherits author from its name" \
+    && echo "$err" | grep -q "author: false" \
+    && ! echo "$err" | grep -q "declares both author and review"; then
+  ok "name-default collision attributes review-declared, author-inherited"
+else
+  fail "name-default collision attributes review-declared, author-inherited" "ec=$ec err=$err"
 fi
 teardown
 

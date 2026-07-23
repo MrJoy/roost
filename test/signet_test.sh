@@ -11,7 +11,7 @@ FAIL=0
 TDIR=""
 
 ok()   { echo "PASS: $1"; PASS=$((PASS+1)); }
-fail() { echo "FAIL: $1 ${2:+— $2}"; FAIL=$((FAIL+1)); }
+fail() { echo "FAIL: $1 ${2:+- $2}"; FAIL=$((FAIL+1)); }
 
 setup() {
   TDIR="$(mktemp -d /tmp/roost-signet-test-XXXXXXXX)"
@@ -55,20 +55,36 @@ else
 fi
 [ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
 
-# -- Test: signet entry precedes the irc relay entry in PreToolUse --
+# -- Test: signet decides first on BOTH PreToolUse and PermissionRequest --
+# roost's job is to wire signet-eval as a separate hook entry ordered ahead of
+# the IRC relay on each surface. The runtime ALLOW/DENY-short-circuit vs
+# ASK-falls-through composition is Claude Code's multi-hook merge across those
+# two independent entries, plus signet-eval's own hook-decision output
+# contract. Neither is roost code, so that behavior is verified live against
+# the native TUI per the permission-relay parity rule, not in these claude-free
+# wiring tests. Here we pin what roost owns: both surfaces carry signet, ordered
+# before the relay. The prior version checked only PreToolUse, and via a raw
+# byte offset that could not tell the two surfaces apart.
 setup
 mkdir -p "$TDIR/.signet"
 stub_signet_eval
 out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 PATH="${STUBS}:${PATH}" "${ROOST_BIN}" spawn testnick --perm-irc --perm-target op --permission-mode acceptEdits --cwd "$TDIR" 2>&1 || true)"
 data_dir="$(echo "$out" | sed -n 's/.*data dir (preflight): //p' | head -1)"
-settings="$(cat "$data_dir/roost-settings.json" 2>/dev/null)"
-# signet's byte offset in the Bash matcher entry must be before irc-pretooluse-prompt's.
-sig_pos=$(printf '%s' "$settings" | grep -boF 'signet-eval' | head -1 | cut -d: -f1)
-irc_pos=$(printf '%s' "$settings" | grep -boF 'irc-pretooluse-prompt' | head -1 | cut -d: -f1)
-if [ -n "$sig_pos" ] && [ -n "$irc_pos" ] && [ "$sig_pos" -lt "$irc_pos" ]; then
-  ok "signet entry precedes irc relay entry (signet decides first)"
+settings_file="$data_dir/roost-settings.json"
+# order(arr;a;b): true iff, within hook array `arr`, the first entry whose
+# command matches `a` comes before the first whose command matches `b`.
+if jq -e '
+    def order(arr; a; b):
+      (arr | map(.hooks[0].command)) as $c
+      | ([range(0; ($c|length)) | select($c[.] | test(a))][0]) as $ia
+      | ([range(0; ($c|length)) | select($c[.] | test(b))][0]) as $ib
+      | ($ia != null and $ib != null and $ia < $ib);
+    order(.hooks.PreToolUse; "signet-eval"; "irc-pretooluse-prompt")
+    and order(.hooks.PermissionRequest; "signet-eval"; "irc-permission-prompt")
+  ' "$settings_file" >/dev/null 2>&1; then
+  ok "signet precedes irc relay on both PreToolUse and PermissionRequest"
 else
-  fail "signet entry precedes irc relay entry" "sig=$sig_pos irc=$irc_pos"
+  fail "signet precedes irc relay on both PreToolUse and PermissionRequest" "settings=$(cat "$settings_file" 2>/dev/null)"
 fi
 [ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
 

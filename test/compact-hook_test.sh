@@ -11,7 +11,7 @@ PASS=0
 FAIL=0
 
 ok()   { echo "PASS: $1"; PASS=$((PASS+1)); }
-fail() { echo "FAIL: $1 ${2:+— $2}"; FAIL=$((FAIL+1)); }
+fail() { echo "FAIL: $1 ${2:+- $2}"; FAIL=$((FAIL+1)); }
 
 # Mock tmux: log the invocation + stdin (for load-buffer -) into a per-test
 # trace file. has-session returns 0 so the hook treats the session as live.

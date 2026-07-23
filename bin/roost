@@ -298,10 +298,26 @@ Provider selection:
   .orchestrator/config.json. No --provider and no --role means no
   registry: today's behavior, claude harness with the opus default.
 
-  Cross-org rule: spawning a reviewer requires its provider org to differ
-  from the recorded worker org. The spawn fails when every candidate is
-  same-org. --allow-same-org "<reason>" overrides the rule and records
-  the reason.
+  Cross-org rule: a review role's provider org must differ from the recorded author org.
+  Roles are declared in .orchestrator/config.json .roles. A role
+  value is a provider name, a list of candidates, or an object
+  {"candidates": [...], "author": true} or {"candidates": [...], "review": true}.
+  A role declares at most one of "author"/"review"; declaring both is a
+  config error and spawn refuses to start. An author role
+  records the author org for its issue. A review role is gated: the spawn
+  picks the first candidate whose org differs from the author, and fails when
+  every candidate is same-org. A role that is neither records nothing and is
+  not gated. The names "worker" and "reviewer" default to author and review
+  respectively, even in the bare form, so an existing "reviewer": [...] stays
+  gated. To turn a name default off, set that property false ("author": false
+  on a "worker"-named role, "review": false on a "reviewer"-named role), or
+  rename the role.
+
+  --allow-same-org "<reason>" overrides the review gate and records the reason.
+  Explicit launch targets (--provider, --model, --harness) carry no role, so
+  the gate cannot run. When one targets an issue that already has a recorded
+  author, roost notes it and appends a #bypass audit record. It does not block:
+  explicit flags win.
 
   Registry reads use jq. The jq check only fires when --provider or
   --role is set. A bare spawn never needs jq on PATH.
@@ -814,6 +830,14 @@ cmd_spawn() {
     echo "error: --model and --agent are mutually exclusive — the agent's frontmatter wins on model, so --model would be silently ignored" >&2
     exit 1
   fi
+  # Derive the issue key once, before any resolution path: explicit --issue
+  # wins, else parse the first #<project>-issue-<N> channel out of --channels.
+  # Needed by the reviewer cross-org gate, worker author-recording, and the
+  # explicit-path bypass audit, so it lives above all of them.
+  local issue_key="${issue}"
+  if [ -z "${issue_key}" ]; then
+    issue_key="$(printf '%s' "${channels}" | grep -oE '#[a-zA-Z0-9_-]+-issue-[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)"
+  fi
   # Registry resolution only runs when --provider/--role select it, and only
   # when no explicit --harness/--model already pinned the launch target (those
   # win outright and skip the registry read entirely). require_jq is called
@@ -829,29 +853,49 @@ cmd_spawn() {
     local _registry_prev_pwd _registry_rc
     _registry_prev_pwd="$(pwd)"
     cd "${cwd}" || return 1
-    # Derive issue key: explicit --issue wins, else parse the first
-    # #<project>-issue-<N> channel out of --channels. Derived before
-    # resolution (not just for worker recording) because the reviewer
-    # cross-org gate needs it to look up the recorded author-org.
-    local issue_key="${issue}"
-    if [ -z "${issue_key}" ]; then
-      issue_key="$(printf '%s' "${channels}" | grep -oE '#[a-zA-Z0-9_-]+-issue-[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)"
+    # A role must declare at most one of author/review. Both true would let the
+    # reviewer gate's resolved org silently overwrite the author record below
+    # (assignment_record runs unconditionally for author roles), corrupting the
+    # cross-org gate's audit trail for a later reviewer on the same issue. Fail
+    # fast instead of picking one path arbitrarily. Scoped to the role path only:
+    # the --provider path has no role, so the contradiction cannot occur there.
+    if [ -z "${provider}" ] && registry_role_is_review "${role}" && registry_role_is_author "${role}"; then
+      # One side may be an explicit declaration and the other inherited from the
+      # role's name default ("worker" defaults author, "reviewer" defaults
+      # review). Attribute the conflict to its actual source so the remedy is
+      # clear: an explicit-both config wants one property removed; a name-default
+      # collision wants the inherited property set false, or the role renamed.
+      local _decl_author=0 _decl_review=0
+      registry_role_declares "${role}" author && _decl_author=1
+      registry_role_declares "${role}" review && _decl_review=1
+      cd "${_registry_prev_pwd}" || return 1
+      if [ "${_decl_author}" -eq 1 ] && [ "${_decl_review}" -eq 1 ]; then
+        echo "error: role '${role}' declares both author and review; a role must be at most one. Remove one property." >&2
+      elif [ "${_decl_review}" -eq 1 ]; then
+        echo "error: role '${role}' declares review and inherits author from its name '${role}'; a role must be at most one. Set author: false to drop the name default, or rename the role." >&2
+      else
+        echo "error: role '${role}' declares author and inherits review from its name '${role}'; a role must be at most one. Set review: false to drop the name default, or rename the role." >&2
+      fi
+      return 1
     fi
     if [ -n "${provider}" ]; then
       registry_provider_fields "${provider}"; _registry_rc=$?
-    elif [ "${role}" = "reviewer" ]; then
-      policy_gate_reviewer "${issue_key}" "reviewer" "${allow_same_org}" "${allow_same_org_reason}"
+      # Explicit launch target: no role, so the gate never ran. Audit if this
+      # touches a known issue with a recorded author.
+      [ "${_registry_rc}" -eq 0 ] && bypass_audit "${issue_key}" "${RESOLVED_PROVIDER_NAME}" "${RESOLVED_ORG}"
+    elif registry_role_is_review "${role}"; then
+      policy_gate_reviewer "${issue_key}" "${role}" "${allow_same_org}" "${allow_same_org_reason}"
       _registry_rc=$?
     else
       registry_resolve_role "${role}"; _registry_rc=$?
     fi
-    # Record the resolved author-org into per-issue assignment state, for
-    # worker spawns only. Must run here, before hopping back out of --cwd:
-    # assignment_record writes a cwd-relative path, so it has to land in the
-    # spawn target's .orchestrator/, not the process's real cwd.
-    if [ "${_registry_rc}" -eq 0 ] && [ "${role}" = "worker" ]; then
+    # Record the resolved author-org for any author role (config "author": true
+    # or the built-in "worker" default), not just the literal name "worker".
+    # Must run before hopping back out of --cwd: assignment_record writes a
+    # cwd-relative path.
+    if [ "${_registry_rc}" -eq 0 ] && [ -z "${provider}" ] && registry_role_is_author "${role}"; then
       if [ -n "${issue_key}" ]; then
-        assignment_record "${issue_key}" "worker" "${RESOLVED_PROVIDER_NAME}" "${RESOLVED_ORG}"
+        assignment_record "${issue_key}" "${role}" "${RESOLVED_PROVIDER_NAME}" "${RESOLVED_ORG}"
         echo "  recorded author-org '${RESOLVED_ORG}' for issue ${issue_key} (provider ${RESOLVED_PROVIDER_NAME})"
       fi
     fi
@@ -863,6 +907,28 @@ cmd_spawn() {
   fi
   if [ -z "${model}" ] && [ -z "${agent}" ]; then
     model="opus"
+  fi
+  # Bypass audit for explicit --model/--harness (the --provider path is audited
+  # inside the registry block). These flags skip the registry entirely, so this
+  # engages jq only when .orchestrator/provider-assignments.json already exists,
+  # preserving the "a bare spawn never needs jq" invariant. --agent is excluded:
+  # its model comes from the agent frontmatter, a separate path.
+  if { [ "${model_explicit}" -eq 1 ] || [ "${harness_explicit}" -eq 1 ]; } \
+      && [ -z "${provider}" ] && [ -z "${agent}" ] && [ -n "${issue_key}" ]; then
+    local _audit_prev_pwd; _audit_prev_pwd="$(pwd)"
+    cd "${cwd}" || return 1
+    if [ -f ".orchestrator/provider-assignments.json" ]; then
+      if command -v jq &>/dev/null; then
+        # shellcheck source=bin/roost-registry.sh disable=SC1091
+        source "$(dirname "${ROOST_BIN}")/roost-registry.sh"
+        local _audit_org; _audit_org="$(registry_vendor_org "${model}")"
+        [ -n "${_audit_org}" ] || _audit_org="unknown"
+        bypass_audit "${issue_key}" "" "${_audit_org}"
+      else
+        echo "  note: issue ${issue_key} has .orchestrator state but jq is absent; skipping #bypass audit." >&2
+      fi
+    fi
+    cd "${_audit_prev_pwd}" || return 1
   fi
   local prompt_sources=0
   [ -n "${prompt_file}" ]     && prompt_sources=$((prompt_sources + 1))
@@ -1047,9 +1113,18 @@ cmd_spawn() {
   # in RESP_INNER_CMD, and appends any extra tmux -e pairs to RESP_TMUX_ENV.
   # Sourced after harness validation and after ROOST_DATA_DIR / ROOST_SETTINGS
   # are established.
-  # shellcheck source=bin/roost-harness-claude.sh disable=SC1091
-  if ! source "$(dirname "${ROOST_BIN}")/roost-harness-${harness}.sh" 2>/dev/null; then
+  local _adapter; _adapter="$(dirname "${ROOST_BIN}")/roost-harness-${harness}.sh"
+  if [ ! -f "${_adapter}" ]; then
     echo "error: no adapter for harness '${harness}'" >&2
+    return 1
+  fi
+  # Source without 2>/dev/null: a syntax error in the adapter must surface as a
+  # bash parse error, not be misreported as a missing adapter. The missing-file
+  # case is already handled above, so a non-zero here means the file exists but
+  # failed to source.
+  # shellcheck source=bin/roost-harness-claude.sh disable=SC1091
+  if ! source "${_adapter}"; then
+    echo "error: adapter for harness '${harness}' failed to load (see error above)" >&2
     return 1
   fi
   local RESP_INNER_CMD=""

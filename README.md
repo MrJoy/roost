@@ -206,22 +206,45 @@ roost spawn scratch-h -c '#sandbox' -m haiku \
 `roost init` scaffolds two empty registry keys in `.orchestrator/config.json`:
 `providers` (named entries with a harness, a model, and optionally
 `base_url_env` / `auth_env` naming the env vars that hold an alternate
-backend's URL and token) and `roles` (role name to one or more provider
-names, in preference order). Fill these in to let `roost spawn --provider
-NAME` or `roost spawn --role NAME` pick harness, model, and backend for
-you. Provider resolution order: explicit `--harness`, `--model`, or
-`--agent` always wins and skips the registry entirely. `--provider`
-resolves that named provider directly. `--role` resolves through the
-roles map in `.orchestrator/config.json`. No `--provider` and no `--role`
-means no registry: today's behavior, claude harness with the opus
-default. The Codex harness (`--harness codex`) is a stub in this release.
-It fails fast and points at the follow-up adapter work.
+backend's URL and token) and `roles`. A role value is a provider name, a
+list of candidates, or an object `{"candidates": [...], "author": true}`
+or `{"candidates": [...], "review": true}`. Fill these in to let `roost
+spawn --provider NAME` or `roost spawn --role NAME` pick harness, model,
+and backend for you.
+Provider resolution order: explicit `--harness`, `--model`, or `--agent`
+always wins and skips the registry entirely. `--provider` resolves that
+named provider directly. `--role` resolves through the roles map in
+`.orchestrator/config.json`. No `--provider` and no `--role` means no
+registry: today's behavior, claude harness with the opus default. The
+Codex harness (`--harness codex`) is a stub in this release. It fails
+fast and points at the follow-up adapter work.
 
-Spawning a reviewer through `--role reviewer` also runs a cross-org
-gate. Cross-org rule: spawning a reviewer requires its provider org to
-differ from the recorded worker org. The spawn fails when every
-candidate is same-org. `--allow-same-org "<reason>"` overrides the rule
-and records the reason.
+An author role records the author org for its issue. A review role is
+gated: the spawn picks the first candidate whose org differs from the
+author, and fails when every candidate is same-org. A role that is
+neither records nothing and is not gated. The names `worker` and
+`reviewer` default to author and review respectively, even in the bare
+form, so an existing `"reviewer": [...]` stays gated. To turn a name
+default off, set that property false (`"author": false` on a
+`worker`-named role, `"review": false` on a `reviewer`-named role), or
+rename the role.
+
+Cross-org rule: a review role's provider org must differ from the recorded author org.
+`--allow-same-org "<reason>"` overrides the review gate and records the
+reason.
+
+Explicit launch targets (`--provider`, `--model`, `--harness`) carry no
+role, so the gate cannot run. When one targets an issue that already has
+a recorded author, roost notes it and appends a `#bypass` audit record.
+It does not block: explicit flags win.
+
+Migrating from a plain candidate list: a custom-named review role (for
+example `auditor`) must declare `"review": true` to be gated. A
+custom-named author role must declare `"author": true` to record
+authorship. Bare `worker`/`reviewer` keep their original name-based
+behavior, no config change needed. A role declares at most one of
+`author`/`review`; declaring both is a config error and spawn refuses to
+start.
 
 ## Project dispatcher
 

@@ -5,7 +5,7 @@ set -uo pipefail
 ROOST_BIN="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )/bin/roost"
 PASS=0; FAIL=0; TDIR=""
 ok()   { echo "PASS: $1"; PASS=$((PASS+1)); }
-fail() { echo "FAIL: $1 ${2:+— $2}"; FAIL=$((FAIL+1)); }
+fail() { echo "FAIL: $1 ${2:+- $2}"; FAIL=$((FAIL+1)); }
 setup() { TDIR="$(mktemp -d /tmp/roost-harness-test-XXXXXXXX)"; trap 'rm -rf "$TDIR"' EXIT; }
 teardown() { rm -rf "$TDIR"; tmux kill-session -t "roost-testnick" 2>/dev/null || true; trap - EXIT; TDIR=""; }
 

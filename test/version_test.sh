@@ -9,7 +9,7 @@ PASS=0
 FAIL=0
 
 ok()   { echo "PASS: $1"; PASS=$((PASS+1)); }
-fail() { echo "FAIL: $1 ${2:+— $2}"; FAIL=$((FAIL+1)); }
+fail() { echo "FAIL: $1 ${2:+- $2}"; FAIL=$((FAIL+1)); }
 
 expected_version="$(node -p "require('${REPO}/package.json').version")"
 expected="roost ${expected_version}"
