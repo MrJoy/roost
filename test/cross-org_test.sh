@@ -46,6 +46,9 @@ teardown() {
   tmux kill-session -t "roost-p-worker-50" 2>/dev/null || true
   tmux kill-session -t "roost-p-worker-51" 2>/dev/null || true
   tmux kill-session -t "roost-p-worker-52" 2>/dev/null || true
+  tmux kill-session -t "roost-p-reviewer-60" 2>/dev/null || true
+  tmux kill-session -t "roost-p-worker-60" 2>/dev/null || true
+  tmux kill-session -t "roost-p-reviewer-61" 2>/dev/null || true
   trap - EXIT
   TDIR=""
 }
@@ -115,6 +118,54 @@ else
   fail "R1: rejected cross-org override leaves no author record on disk" "ec=$ec asn=$(cat "$asn" 2>/dev/null)"
 fi
 teardown
+
+# -- Test (R2): --agent reviewer --role reviewer runs the gate AND loads the persona --
+setup
+mkdir -p "$TDIR/.orchestrator" "$TDIR/.claude/agents"
+cp "$( cd "$( dirname "${ROOST_BIN}" )/.." && pwd )/agents/reviewer.md" "$TDIR/.claude/agents/reviewer.md"
+# Two orgs. Worker author = openai (gpt). Reviewer candidates = [claude-default
+# (anthropic)] -> gate picks the cross-org anthropic provider. --agent reviewer
+# loads the persona; the role selects the provider.
+printf '{"project":"p","providers":{"claude-default":{"harness":"claude","model":"opus"},"gpt":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"worker":"gpt","reviewer":["claude-default"]}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-worker-60 --role worker --issue 60 --cwd "$TDIR" >/dev/null 2>&1 || true
+out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 "${ROOST_BIN}" spawn p-reviewer-60 --agent reviewer --role reviewer --issue 60 --cwd "$TDIR" 2>&1 || true)"
+data_dir="$(echo "$out" | sed -n 's/.*data dir (preflight): //p' | head -1)"
+inner="$(cat "$data_dir/inner-cmd.txt" 2>/dev/null)"
+# harness/--agent/no-model alone don't distinguish "gate ran" from "gate was
+# skipped": both land on harness=claude, model="" in this config regardless.
+# resolved-provider.txt is the actual discriminator -- it is only written when
+# the registry path executes, so its presence (and org) proves --role really
+# drove resolution instead of --agent silently short-circuiting the guard.
+resolved="$(cat "$data_dir/resolved-provider.txt" 2>/dev/null)"
+if echo "$out" | grep -q "harness: claude" \
+    && echo "$inner" | grep -q -- "--agent reviewer" \
+    && ! echo "$inner" | grep -q -- "--model" \
+    && echo "$resolved" | grep -q '"org":"anthropic"'; then
+  ok "R2: --agent reviewer --role reviewer gates, loads persona, no --model on claude path"
+else
+  fail "R2: --agent reviewer --role reviewer gates, loads persona, no --model on claude path" "out=$out inner=$inner resolved=$resolved"
+fi
+[ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
+
+# -- Test (R2): bare --agent reviewer stays ungated and records nothing --
+setup
+mkdir -p "$TDIR/.orchestrator" "$TDIR/.claude/agents"
+cp "$( cd "$( dirname "${ROOST_BIN}" )/.." && pwd )/agents/reviewer.md" "$TDIR/.claude/agents/reviewer.md"
+printf '{"project":"p","providers":{"gpt":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"worker":"gpt"}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-worker-60 --role worker --issue 61 --cwd "$TDIR" >/dev/null 2>&1 || true
+out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 "${ROOST_BIN}" spawn p-reviewer-61 --agent reviewer --issue 61 --cwd "$TDIR" 2>&1 || true)"
+data_dir="$(echo "$out" | sed -n 's/.*data dir (preflight): //p' | head -1)"
+inner="$(cat "$data_dir/inner-cmd.txt" 2>/dev/null)"
+asn="$TDIR/.orchestrator/provider-assignments.json"
+# Bare --agent: persona loaded, no gate, no #override or reviewer record for issue 61.
+if echo "$inner" | grep -q -- "--agent reviewer" \
+    && ! echo "$inner" | grep -q -- "--model" \
+    && ! { jq -e '.["61#override"]' "$asn" >/dev/null 2>&1; }; then
+  ok "R2: bare --agent reviewer stays ungated, records nothing"
+else
+  fail "R2: bare --agent reviewer stays ungated, records nothing" "inner=$inner asn=$(cat "$asn" 2>/dev/null)"
+fi
+[ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
 
 # -- Test: issue key parsed from channel when --issue omitted --
 setup

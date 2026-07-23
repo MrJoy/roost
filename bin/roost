@@ -845,7 +845,7 @@ cmd_spawn() {
   # below), but --role always resolves first so author-recording and the gate
   # run even under an override. require_jq is called here, not unconditionally,
   # so a bare spawn never needs jq on PATH.
-  if [ -z "${agent}" ] && { [ -n "${provider}" ] || [ -n "${role}" ]; }; then
+  if [ -n "${provider}" ] || [ -n "${role}" ]; then
     require_jq || return 1
     # shellcheck source=bin/roost-registry.sh disable=SC1091
     source "$(dirname "${ROOST_BIN}")/roost-registry.sh"
@@ -921,7 +921,19 @@ cmd_spawn() {
     # resolved values, but the role still drove author-recording and the gate
     # above. Only adopt the resolved value when the operator did not pin one.
     [ "${harness_explicit}" -eq 0 ] && harness="${RESOLVED_HARNESS}"
-    [ "${model_explicit}" -eq 0 ] && model="${RESOLVED_MODEL}"
+    if [ "${model_explicit}" -eq 0 ]; then
+      # With --agent on the Claude harness, leave the model empty so claude reads
+      # permissionMode: and the pinned model natively from the agent frontmatter.
+      # This keeps the launch byte-identical to a bare --agent spawn while the
+      # role still drove author-recording and the gate above. On a non-Claude
+      # harness (Codex has no frontmatter) the resolved model is adopted so the
+      # provider selection actually reaches the launch.
+      if [ -n "${agent}" ] && [ "${harness}" = "claude" ]; then
+        model=""
+      else
+        model="${RESOLVED_MODEL}"
+      fi
+    fi
     # base_url_env / auth_env / org are consumed by later provider-wiring work.
   fi
   if [ -z "${model}" ] && [ -z "${agent}" ]; then
