@@ -93,6 +93,16 @@ registry_role_is_review() {
   esac
 }
 
+# registry_role_declares <role> <author|review> -> exit 0 if the role's config
+# object explicitly sets that property to true. Distinguishes an explicit
+# declaration from a value inherited via the "worker"/"reviewer" name default,
+# so callers can attribute a both-author-and-review conflict to the right source.
+registry_role_declares() {
+  local role="$1" prop="$2" cfg; cfg="$(_registry_config_path)"
+  [ -f "$cfg" ] || return 1
+  jq -e --arg r "$role" --arg p "$prop" '.roles[$r] | objects | .[$p] == true' "$cfg" >/dev/null 2>&1
+}
+
 # registry_resolve_role <role>: resolve to the FIRST candidate (a later task
 # replaces this with the policy gate for reviewer roles).
 registry_resolve_role() {

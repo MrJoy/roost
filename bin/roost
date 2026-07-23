@@ -309,7 +309,9 @@ Provider selection:
   every candidate is same-org. A role that is neither records nothing and is
   not gated. The names "worker" and "reviewer" default to author and review
   respectively, even in the bare form, so an existing "reviewer": [...] stays
-  gated; rename the role or set "review": false to opt out.
+  gated. To turn a name default off, set that property false ("author": false
+  on a "worker"-named role, "review": false on a "reviewer"-named role), or
+  rename the role.
 
   --allow-same-org "<reason>" overrides the review gate and records the reason.
   Explicit launch targets (--provider, --model, --harness) carry no role, so
@@ -858,8 +860,22 @@ cmd_spawn() {
     # fast instead of picking one path arbitrarily. Scoped to the role path only:
     # the --provider path has no role, so the contradiction cannot occur there.
     if [ -z "${provider}" ] && registry_role_is_review "${role}" && registry_role_is_author "${role}"; then
-      echo "error: role '${role}' declares both author and review; a role must declare at most one" >&2
+      # One side may be an explicit declaration and the other inherited from the
+      # role's name default ("worker" defaults author, "reviewer" defaults
+      # review). Attribute the conflict to its actual source so the remedy is
+      # clear: an explicit-both config wants one property removed; a name-default
+      # collision wants the inherited property set false, or the role renamed.
+      local _decl_author=0 _decl_review=0
+      registry_role_declares "${role}" author && _decl_author=1
+      registry_role_declares "${role}" review && _decl_review=1
       cd "${_registry_prev_pwd}" || return 1
+      if [ "${_decl_author}" -eq 1 ] && [ "${_decl_review}" -eq 1 ]; then
+        echo "error: role '${role}' declares both author and review; a role must be at most one. Remove one property." >&2
+      elif [ "${_decl_review}" -eq 1 ]; then
+        echo "error: role '${role}' declares review and inherits author from its name '${role}'; a role must be at most one. Set author: false to drop the name default, or rename the role." >&2
+      else
+        echo "error: role '${role}' declares author and inherits review from its name '${role}'; a role must be at most one. Set review: false to drop the name default, or rename the role." >&2
+      fi
       return 1
     fi
     if [ -n "${provider}" ]; then

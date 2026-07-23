@@ -250,6 +250,24 @@ else
 fi
 teardown
 
+# -- Test: name-default collision attributes the conflict to the right source --
+setup
+mkdir -p "$TDIR/.orchestrator"
+# A role named "worker" that declares review:true inherits author:true from its
+# name default. The error must say review was declared and author inherited,
+# and point at the "author: false" remedy, not claim both were declared.
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"worker":{"candidates":["c1"],"review":true}}}' > "$TDIR/.orchestrator/config.json"
+err="$("${ROOST_BIN}" spawn p-worker-41 --role worker --issue 41 --cwd "$TDIR" 2>&1)"; ec=$?
+if [ "$ec" -ne 0 ] \
+    && echo "$err" | grep -q "declares review and inherits author from its name" \
+    && echo "$err" | grep -q "author: false" \
+    && ! echo "$err" | grep -q "declares both author and review"; then
+  ok "name-default collision attributes review-declared, author-inherited"
+else
+  fail "name-default collision attributes review-declared, author-inherited" "ec=$ec err=$err"
+fi
+teardown
+
 echo ""
 echo "Results: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ]

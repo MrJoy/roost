@@ -224,8 +224,10 @@ gated: the spawn picks the first candidate whose org differs from the
 author, and fails when every candidate is same-org. A role that is
 neither records nothing and is not gated. The names `worker` and
 `reviewer` default to author and review respectively, even in the bare
-form, so an existing `"reviewer": [...]` stays gated; rename the role or
-set `"review": false` to opt out.
+form, so an existing `"reviewer": [...]` stays gated. To turn a name
+default off, set that property false (`"author": false` on a
+`worker`-named role, `"review": false` on a `reviewer`-named role), or
+rename the role.
 
 Cross-org rule: a review role's provider org must differ from the recorded author org.
 `--allow-same-org "<reason>"` overrides the review gate and records the
