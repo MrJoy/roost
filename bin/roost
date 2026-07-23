@@ -814,6 +814,14 @@ cmd_spawn() {
     echo "error: --model and --agent are mutually exclusive — the agent's frontmatter wins on model, so --model would be silently ignored" >&2
     exit 1
   fi
+  # Derive the issue key once, before any resolution path: explicit --issue
+  # wins, else parse the first #<project>-issue-<N> channel out of --channels.
+  # Needed by the reviewer cross-org gate, worker author-recording, and the
+  # explicit-path bypass audit, so it lives above all of them.
+  local issue_key="${issue}"
+  if [ -z "${issue_key}" ]; then
+    issue_key="$(printf '%s' "${channels}" | grep -oE '#[a-zA-Z0-9_-]+-issue-[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)"
+  fi
   # Registry resolution only runs when --provider/--role select it, and only
   # when no explicit --harness/--model already pinned the launch target (those
   # win outright and skip the registry read entirely). require_jq is called
@@ -829,29 +837,21 @@ cmd_spawn() {
     local _registry_prev_pwd _registry_rc
     _registry_prev_pwd="$(pwd)"
     cd "${cwd}" || return 1
-    # Derive issue key: explicit --issue wins, else parse the first
-    # #<project>-issue-<N> channel out of --channels. Derived before
-    # resolution (not just for worker recording) because the reviewer
-    # cross-org gate needs it to look up the recorded author-org.
-    local issue_key="${issue}"
-    if [ -z "${issue_key}" ]; then
-      issue_key="$(printf '%s' "${channels}" | grep -oE '#[a-zA-Z0-9_-]+-issue-[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)"
-    fi
     if [ -n "${provider}" ]; then
       registry_provider_fields "${provider}"; _registry_rc=$?
-    elif [ "${role}" = "reviewer" ]; then
-      policy_gate_reviewer "${issue_key}" "reviewer" "${allow_same_org}" "${allow_same_org_reason}"
+    elif registry_role_is_review "${role}"; then
+      policy_gate_reviewer "${issue_key}" "${role}" "${allow_same_org}" "${allow_same_org_reason}"
       _registry_rc=$?
     else
       registry_resolve_role "${role}"; _registry_rc=$?
     fi
-    # Record the resolved author-org into per-issue assignment state, for
-    # worker spawns only. Must run here, before hopping back out of --cwd:
-    # assignment_record writes a cwd-relative path, so it has to land in the
-    # spawn target's .orchestrator/, not the process's real cwd.
-    if [ "${_registry_rc}" -eq 0 ] && [ "${role}" = "worker" ]; then
+    # Record the resolved author-org for any author role (config "author": true
+    # or the built-in "worker" default), not just the literal name "worker".
+    # Must run before hopping back out of --cwd: assignment_record writes a
+    # cwd-relative path.
+    if [ "${_registry_rc}" -eq 0 ] && [ -z "${provider}" ] && registry_role_is_author "${role}"; then
       if [ -n "${issue_key}" ]; then
-        assignment_record "${issue_key}" "worker" "${RESOLVED_PROVIDER_NAME}" "${RESOLVED_ORG}"
+        assignment_record "${issue_key}" "${role}" "${RESOLVED_PROVIDER_NAME}" "${RESOLVED_ORG}"
         echo "  recorded author-org '${RESOLVED_ORG}' for issue ${issue_key} (provider ${RESOLVED_PROVIDER_NAME})"
       fi
     fi

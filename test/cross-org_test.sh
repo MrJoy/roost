@@ -29,6 +29,10 @@ teardown() {
   tmux kill-session -t "roost-p-worker-9" 2>/dev/null || true
   tmux kill-session -t "roost-p-reviewer-9" 2>/dev/null || true
   tmux kill-session -t "roost-p-reviewer-9b" 2>/dev/null || true
+  tmux kill-session -t "roost-p-builder-20" 2>/dev/null || true
+  tmux kill-session -t "roost-p-auditor-20" 2>/dev/null || true
+  tmux kill-session -t "roost-p-builder-21" 2>/dev/null || true
+  tmux kill-session -t "roost-p-scout-22" 2>/dev/null || true
   trap - EXIT
   TDIR=""
 }
@@ -118,6 +122,47 @@ if echo "$out" | grep -qi "override" \
   ok "--allow-same-org appends override records; worker author survives"
 else
   fail "--allow-same-org appends override records; worker author survives" "out=$out asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test: a custom-named review role is gated (not just "reviewer") --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"builder":{"candidates":["c1"],"author":true},"auditor":{"candidates":["c1","c2"],"review":true}}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-builder-20 --role builder --issue 20 --cwd "$TDIR" >/dev/null 2>&1 || true
+err="$("${ROOST_BIN}" spawn p-auditor-20 --role auditor --issue 20 --cwd "$TDIR" 2>&1)"; ec=$?
+# author c1 is anthropic; auditor candidates c1,c2 are both anthropic -> gate hard-fails.
+if [ "$ec" -ne 0 ] && echo "$err" | grep -q "cross-org" && echo "$err" | grep -q "allow-same-org"; then
+  ok "custom-named review role 'auditor' is gated"
+else
+  fail "custom-named review role 'auditor' is gated" "ec=$ec err=$err"
+fi
+teardown
+
+# -- Test: a custom-named author role records authorship (not just "worker") --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"gpt":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"builder":{"candidates":["gpt"],"author":true}}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-builder-21 --role builder --issue 21 --cwd "$TDIR" >/dev/null 2>&1 || true
+if jq -e '.["21"].org == "openai" and .["21"].role == "builder"' "$TDIR/.orchestrator/provider-assignments.json" >/dev/null 2>&1; then
+  ok "custom-named author role 'builder' records author-org"
+else
+  fail "custom-named author role 'builder' records author-org" "$(cat "$TDIR/.orchestrator/provider-assignments.json" 2>/dev/null)"
+fi
+teardown
+
+# -- Test: a neutral role (neither author nor review) records nothing and is ungated --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"scout":["c1","c2"]}}' > "$TDIR/.orchestrator/config.json"
+out="$("${ROOST_BIN}" spawn p-scout-22 --role scout --issue 22 --cwd "$TDIR" 2>&1 || true)"
+asn="$TDIR/.orchestrator/provider-assignments.json"
+# scout resolves to its first candidate with no gate and writes no author record.
+if echo "$out" | grep -q "harness: claude" \
+    && ! { [ -f "$asn" ] && jq -e '.["22"]' "$asn" >/dev/null 2>&1; }; then
+  ok "neutral role 'scout' is ungated and records nothing"
+else
+  fail "neutral role 'scout' is ungated and records nothing" "out=$out asn=$(cat "$asn" 2>/dev/null)"
 fi
 teardown
 
