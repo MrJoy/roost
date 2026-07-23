@@ -298,10 +298,22 @@ Provider selection:
   .orchestrator/config.json. No --provider and no --role means no
   registry: today's behavior, claude harness with the opus default.
 
-  Cross-org rule: spawning a reviewer requires its provider org to differ
-  from the recorded worker org. The spawn fails when every candidate is
-  same-org. --allow-same-org "<reason>" overrides the rule and records
-  the reason.
+  Cross-org rule: a review role's provider org must differ from the recorded author org.
+  Roles are declared in .orchestrator/config.json .roles. A role
+  value is a provider name, a list of candidates, or an object
+  {"candidates": [...], "author": true, "review": true}. An author role
+  records the author org for its issue. A review role is gated: the spawn
+  picks the first candidate whose org differs from the author, and fails when
+  every candidate is same-org. A role that is neither records nothing and is
+  not gated. The names "worker" and "reviewer" default to author and review
+  respectively, even in the bare form, so an existing "reviewer": [...] stays
+  gated; rename the role or set "review": false to opt out.
+
+  --allow-same-org "<reason>" overrides the review gate and records the reason.
+  Explicit launch targets (--provider, --model, --harness) carry no role, so
+  the gate cannot run. When one targets an issue that already has a recorded
+  author, roost notes it and appends a #bypass audit record. It does not block:
+  explicit flags win.
 
   Registry reads use jq. The jq check only fires when --provider or
   --role is set. A bare spawn never needs jq on PATH.

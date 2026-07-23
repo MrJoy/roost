@@ -103,8 +103,9 @@ lists the `NAME`s available:
 
 `roost init` scaffolds two empty keys in `.orchestrator/config.json`:
 `providers` (named provider entries: harness, model, and optionally
-`base_url_env` / `auth_env` for an alternate backend) and `roles` (role
-name to one or more provider names, in preference order). An operator
+`base_url_env` / `auth_env` for an alternate backend) and `roles`. A role
+value is a provider name, a list of candidates, or an object
+`{"candidates": [...], "author": true, "review": true}`. An operator
 fills these in by hand. An empty registry is not an error. `roost spawn`
 without `--provider` or `--role` works exactly as it does today.
 
@@ -117,11 +118,23 @@ named provider directly. `--role` resolves through the roles map in
 `.orchestrator/config.json`. No `--provider` and no `--role` means no
 registry: today's behavior, claude harness with the opus default.
 
-Cross-org rule: spawning a reviewer requires its provider org to differ
-from the recorded worker org. The spawn fails when every candidate is
-same-org. `--allow-same-org "<reason>"` overrides the rule and records
-the reason. Any `--allow-same-org` override must be announced in
+An author role records the author org for its issue. A review role is
+gated: the spawn picks the first candidate whose org differs from the
+author, and fails when every candidate is same-org. A role that is
+neither records nothing and is not gated. The names `worker` and
+`reviewer` default to author and review respectively, even in the bare
+form, so an existing `"reviewer": [...]` stays gated; rename the role or
+set `"review": false` to opt out.
+
+Cross-org rule: a review role's provider org must differ from the recorded author org.
+`--allow-same-org "<reason>"` overrides the review gate and records the
+reason. Any `--allow-same-org` override must be announced in
 `#<project>-leads`.
+
+Explicit launch targets (`--provider`, `--model`, `--harness`) carry no
+role, so the gate cannot run. When one targets an issue that already has
+a recorded author, roost notes it and appends a `#bypass` audit record.
+It does not block: explicit flags win.
 
 The Codex harness is a stub in this release. Spawning `--harness codex`
 (directly or via the registry) fails fast and names the follow-up
