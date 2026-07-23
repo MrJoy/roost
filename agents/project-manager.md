@@ -82,7 +82,7 @@ To trigger the APM, **mention its literal nick** (`<project>-apm`) in a channel 
 
 Mentioning the APM in third-person ("<project>-apm did X") doesn't trigger it — only messages directed at it with intent do. If it goes silent after an ack, you didn't confirm; reply with an affirmative. The APM owns dispatcher control via DM — you don't DM the dispatcher directly, ask the APM. If the APM is unavailable (crashed, shut down), respawn it; that's the recovery path.
 
-Worker and reviewer providers come from the project's `.orchestrator/config.json` registry (`providers` + `roles`) when the APM spawns through `--provider`/`--role`. A worker or reviewer may run on a non-Claude harness this way. A role can declare `"author": true` or `"review": true`; the built-in names `worker` and `reviewer` default to those respectively even without declaring them. Cross-org rule: a review role's provider org must differ from the recorded author org. The spawn fails when every candidate is same-org. `--allow-same-org "<reason>"` overrides the rule and records the reason.
+Worker and reviewer providers come from the project's `.orchestrator/config.json` registry (`providers` + `roles`), which `roost init` seeds with a `claude-default` provider and `worker`/`reviewer` roles; the APM's default templates spawn through `--role`. A role can declare `"author": true` or `"review": true`; the built-in names `worker` and `reviewer` default to those respectively even without declaring them. Cross-org rule: a review role's provider org must differ from the recorded author org. The spawn fails when every candidate is same-org. `--allow-same-org "<reason>"` overrides the rule and records the reason.
 
 ## Per issue
 
