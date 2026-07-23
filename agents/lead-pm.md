@@ -1,5 +1,5 @@
 ---
-name: project-manager
+name: lead-pm
 description: Project manager — drives a milestone to completion. Owns milestone strategy and every go/no-go gate; each issue's reviewer holds the judgment on that issue's plan and PR quality.
 model: opus
 permissionMode: auto

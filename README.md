@@ -5,7 +5,7 @@
 # roost
 
 Roost lets you run your own team of Claude Code agents on a real project. A
-project-manager agent picks up issues from a GitHub milestone and spawns workers and
+lead-pm agent picks up issues from a GitHub milestone and spawns workers and
 reviewers to drive each one through PR; the team coordinates over a local IRC
 server you can join from any client. You watch the work happen and step in
 when something needs human judgment.
@@ -26,7 +26,7 @@ on a shared host or expose port 6667 beyond localhost.
 
 ## Running a milestone
 
-Roost is built for parallel milestone work. Spawn one agent — project-manager —
+Roost is built for parallel milestone work. Spawn one agent — lead-pm —
 and hand it a GitHub milestone. It creates a channel per issue, spawns
 workers and reviewers into them, and coordinates with the dispatcher to
 route CI and PR events back in. You watch and intervene from weechat on
@@ -39,7 +39,7 @@ Bootstrap your project, then kick off the PM:
 cd ~/Dev/myproject
 roost init --repo Owner/myproject   # writes .orchestrator/{config.json, config.local.json, .gitignore} + copies role prompts
 roost spawn myproject-pm \
-  --agent project-manager \
+  --agent lead-pm \
   --channels '#myproject-leads' \
   --steer-compact --cache-ttl 1h \
   --ask-irc '#myproject-leads' --ask-target <your-nick> \
@@ -48,7 +48,7 @@ roost spawn myproject-pm \
 
 See [`docs/ROOST-IN-PRACTICE.md`](docs/ROOST-IN-PRACTICE.md) for the end-to-end walkthrough.
 
-Roost ships more agents than project-manager — each is a `roost spawn <nick> --agent <name>`
+Roost ships more agents than lead-pm — each is a `roost spawn <nick> --agent <name>`
 target. `roost agents` lists the ones installed in your project; `roost agents
 --all` also shows what roost ships but you haven't installed yet, and how to
 pull them in.

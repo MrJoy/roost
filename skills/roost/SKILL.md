@@ -205,7 +205,7 @@ Routes AskUserQuestion calls to a channel instead of blocking the terminal; pair
 
 ```bash
 # The PM routes questions to the leads channel (human answers):
-roost spawn myproject-pm --agent project-manager \
+roost spawn myproject-pm --agent lead-pm \
   --ask-irc '#myproject-leads' --ask-target <your-nick>
 
 # APM routes questions to the leads channel (the PM answers):

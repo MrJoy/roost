@@ -66,7 +66,7 @@ Commands:
 
 Quick start:
   roost init
-  roost spawn <project>-lead-pm \\
+  roost spawn <project>-pm \\
     --agent lead-pm \\
     --channels '#<project>-leads' \\
     --steer-compact --cache-ttl 1h \\
@@ -705,7 +705,7 @@ cmd_init() {
     printf '\nNext step:\n'
   fi
   printf '%s\n' \
-    "  roost spawn ${project}-lead-pm \\" \
+    "  roost spawn ${project}-pm \\" \
     "    --agent lead-pm \\" \
     "    --channels '#${project}-leads' \\" \
     "    --steer-compact --cache-ttl 1h \\" \
