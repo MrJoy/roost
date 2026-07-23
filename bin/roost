@@ -821,7 +821,7 @@ cmd_spawn() {
   if [ "${model_explicit}" -eq 0 ] && [ "${harness_explicit}" -eq 0 ] && [ -z "${agent}" ] \
       && { [ -n "${provider}" ] || [ -n "${role}" ]; }; then
     require_jq || return 1
-    # shellcheck source=bin/roost-registry.sh
+    # shellcheck source=bin/roost-registry.sh disable=SC1091
     source "$(dirname "${ROOST_BIN}")/roost-registry.sh"
     # registry_* functions resolve .orchestrator/config.json relative to the
     # process's cwd, so hop into the spawn target (--cwd) to resolve, then
@@ -1047,13 +1047,20 @@ cmd_spawn() {
   # in RESP_INNER_CMD, and appends any extra tmux -e pairs to RESP_TMUX_ENV.
   # Sourced after harness validation and after ROOST_DATA_DIR / ROOST_SETTINGS
   # are established.
-  # shellcheck source=bin/roost-harness-claude.sh
+  # shellcheck source=bin/roost-harness-claude.sh disable=SC1091
   if ! source "$(dirname "${ROOST_BIN}")/roost-harness-${harness}.sh" 2>/dev/null; then
     echo "error: no adapter for harness '${harness}'" >&2
     return 1
   fi
   local RESP_INNER_CMD=""
   local RESP_TMUX_ENV=()
+  # The REQ_* globals are the adapter request contract: harness_assemble reads
+  # them in the sourced adapter, not within bin/roost. shellcheck lints each
+  # bin file on its own and cannot see that cross-file use, so it reports every
+  # REQ_* as unused. Scope the suppression to just this contract block via the
+  # group command, the mirror of roost-registry.sh's disable for its RESOLVED_*.
+  # shellcheck disable=SC2034
+  {
   REQ_MODEL="${model}"
   REQ_AGENT="${agent}"
   REQ_PERMISSION_MODE="${permission_mode}"
@@ -1074,6 +1081,7 @@ cmd_spawn() {
   REQ_BASE_URL_ENV="${RESOLVED_BASE_URL_ENV:-}"
   REQ_AUTH_ENV="${RESOLVED_AUTH_ENV:-}"
   REQ_SIGNET_ACTIVE="${signet_active}"
+  }
   harness_assemble || return 1
   # Test seam: ROOST_SPAWN_KEEP_DATA_DIR=1 echoes the data-dir path early and
   # suppresses the failure-cleanup trap, so spawn_test.sh can read the files
