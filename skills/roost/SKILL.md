@@ -113,7 +113,10 @@ without `--provider` or `--role` works exactly as it does today.
 from that role's candidates. The two flags are mutually exclusive.
 
 Provider resolution order: explicit `--harness`, `--model`, or `--agent`
-always wins and skips the registry entirely. `--provider` resolves that
+wins over the registry's resolved launch target. Paired with `--role` or
+`--provider`, the registry still resolves and records authorship. A review
+role still gates the launch. On their own, with no `--role` and no
+`--provider`, they skip the registry entirely. `--provider` resolves that
 named provider directly. `--role` resolves through the roles map in
 `.orchestrator/config.json`. No `--provider` and no `--role` means no
 registry: today's behavior, claude harness with the opus default.
@@ -135,6 +138,13 @@ Explicit launch targets (`--provider`, `--model`, `--harness`) carry no
 role, so the gate cannot run. When one targets an issue that already has
 a recorded author, roost notes it and appends a `#bypass` audit record.
 It does not block: explicit flags win.
+
+Where this fires: live on `--role`/`--provider` and the migrated automation
+templates. A no-op in a single-org registry, since there's no cross-org
+mix to catch; it starts working on its own once a second org's provider
+gets added. Inert on a hand-typed bare `--agent` or a bare `--model`/
+`--harness` spawn, since there's no role to gate and a bare spawn never
+reads the registry.
 
 The Codex harness is a stub in this release. Spawning `--harness codex`
 (directly or via the registry) fails fast and names the follow-up

@@ -292,8 +292,12 @@ Agent class guidance:
   worth thinking about — claude-code's native cache behavior applies.
 
 Provider selection:
-  --agent always wins and skips the registry entirely. --provider resolves
-  that named provider directly. --role resolves through the roles map in
+  --agent supplies a persona and permission mode, and composes with --role
+  or --provider: paired with either, the registry still resolves and the
+  gate and audit below still run. A bare --agent with no --role and no
+  --provider carries no provider-axis flag, so it skips the registry
+  entirely, same as today. --provider resolves that named provider
+  directly. --role resolves through the roles map in
   .orchestrator/config.json, still recording authorship and running the
   cross-org gate even when an explicit --model/--harness overrides the
   resolved launch target (the override must share the role's vendor org).
@@ -320,6 +324,12 @@ Provider selection:
   the gate cannot run. When one targets an issue that already has a recorded
   author, roost notes it and appends a #bypass audit record. It does not block:
   explicit flags win.
+
+  Where the gate and audit fire: live on --role/--provider and the migrated
+  automation templates. A no-op in a single-org registry (nothing cross-org
+  to enforce; it engages on its own when a second org's provider is added).
+  Inert on a hand-typed bare --agent or bare --model/--harness spawn: no role,
+  so nothing is gated, and a bare spawn never reads the registry.
 
   Registry reads use jq. The jq check only fires when --provider or
   --role is set. A bare spawn never needs jq on PATH.
