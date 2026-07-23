@@ -142,9 +142,11 @@ It does not block: explicit flags win.
 Where this fires: live on `--role`/`--provider` and the migrated automation
 templates. A no-op in a single-org registry, since there's no cross-org
 mix to catch; it starts working on its own once a second org's provider
-gets added. Inert on a hand-typed bare `--agent` or a bare `--model`/
-`--harness` spawn, since there's no role to gate and a bare spawn never
-reads the registry.
+gets added. A hand-typed bare `--agent` spawn is fully inert: no role to
+gate, no registry read. A bare `--model`/`--harness` spawn can't run the
+gate either, since it carries no role. It still appends a `#bypass` audit
+when it targets an issue that already has a recorded author, as noted
+above.
 
 The Codex harness is a stub in this release. Spawning `--harness codex`
 (directly or via the registry) fails fast and names the follow-up

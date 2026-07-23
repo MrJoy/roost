@@ -328,8 +328,10 @@ Provider selection:
   Where the gate and audit fire: live on --role/--provider and the migrated
   automation templates. A no-op in a single-org registry (nothing cross-org
   to enforce; it engages on its own when a second org's provider is added).
-  Inert on a hand-typed bare --agent or bare --model/--harness spawn: no role,
-  so nothing is gated, and a bare spawn never reads the registry.
+  A hand-typed bare --agent spawn is fully inert: no role, nothing gated,
+  no registry read. A bare --model/--harness spawn cannot run the gate
+  either, since it carries no role. It still appends a #bypass audit when it
+  targets an issue that already has a recorded author, as noted above.
 
   Registry reads use jq. The jq check only fires when --provider or
   --role is set. A bare spawn never needs jq on PATH.
