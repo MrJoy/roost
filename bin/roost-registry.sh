@@ -50,8 +50,47 @@ registry_role_candidates() {
   local val
   val="$(jq -c --arg r "$role" '.roles[$r] // empty' "$cfg")"
   [ -n "$val" ] || { echo "error: unknown role '${role}'. Not found in .orchestrator/config.json roles" >&2; return 1; }
-  # Normalize string-or-array to a newline list.
-  printf '%s' "$val" | jq -r 'if type=="array" then .[] else . end'
+  # A role value is a string, an array, or an object carrying .candidates
+  # (itself a string or array) plus optional author/review properties. Unwrap
+  # the object to its candidates, then flatten string-or-array to a line list.
+  printf '%s' "$val" | jq -r '
+    (if type=="object" then (.candidates // []) else . end)
+    | if type=="array" then .[] else . end'
+}
+
+# registry_role_is_author <role> -> exit 0 if the role records authorship.
+# A role records authorship when its config object sets "author": true; when
+# the object omits "author" (or the value is the bare string/array form) the
+# built-in default applies: a role literally named "worker" is an author role.
+registry_role_is_author() {
+  local role="$1" cfg explicit; cfg="$(_registry_config_path)"
+  if [ -f "$cfg" ]; then
+    explicit="$(jq -r --arg r "$role" '.roles[$r] | if type=="object" and has("author") then (.author|tostring) else "unset" end' "$cfg" 2>/dev/null)"
+  else
+    explicit="unset"
+  fi
+  case "$explicit" in
+    true)  return 0 ;;
+    false) return 1 ;;
+    *)     [ "$role" = "worker" ] && return 0 || return 1 ;;
+  esac
+}
+
+# registry_role_is_review <role> -> exit 0 if the role is cross-org gated.
+# Mirror of registry_role_is_author: "review": true in the object, else the
+# built-in default that a role literally named "reviewer" is a review role.
+registry_role_is_review() {
+  local role="$1" cfg explicit; cfg="$(_registry_config_path)"
+  if [ -f "$cfg" ]; then
+    explicit="$(jq -r --arg r "$role" '.roles[$r] | if type=="object" and has("review") then (.review|tostring) else "unset" end' "$cfg" 2>/dev/null)"
+  else
+    explicit="unset"
+  fi
+  case "$explicit" in
+    true)  return 0 ;;
+    false) return 1 ;;
+    *)     [ "$role" = "reviewer" ] && return 0 || return 1 ;;
+  esac
 }
 
 # registry_resolve_role <role>: resolve to the FIRST candidate (a later task

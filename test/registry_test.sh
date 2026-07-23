@@ -5,6 +5,7 @@
 set -uo pipefail
 
 ROOST_BIN="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )/bin/roost"
+REG="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )/bin/roost-registry.sh"
 PASS=0
 FAIL=0
 TDIR=""
@@ -161,6 +162,69 @@ else
   fail "provider base_url_env/auth_env flow into tmux env" "out=$out env=$(cat "$data_dir/tmux-env.txt" 2>/dev/null)"
 fi
 [ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
+
+# -- Test: object-form role unwraps .candidates (array) --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"a":{"harness":"claude","model":"opus"},"b":{"harness":"codex","model":"gpt-5.1-codex"}},"roles":{"auditor":{"candidates":["a","b"],"review":true}}}' > "$TDIR/.orchestrator/config.json"
+out="$(cd "$TDIR" && source "$REG" && registry_role_candidates auditor)"
+if [ "$out" = "$(printf 'a\nb')" ]; then
+  ok "object-form role unwraps .candidates array in order"
+else
+  fail "object-form role unwraps .candidates array in order" "out=$out"
+fi
+teardown
+
+# -- Test: object-form role with a string .candidates --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"a":{"harness":"claude","model":"opus"}},"roles":{"builder":{"candidates":"a","author":true}}}' > "$TDIR/.orchestrator/config.json"
+out="$(cd "$TDIR" && source "$REG" && registry_role_candidates builder)"
+if [ "$out" = "a" ]; then
+  ok "object-form role unwraps a string .candidates"
+else
+  fail "object-form role unwraps a string .candidates" "out=$out"
+fi
+teardown
+
+# -- Test: object with no candidates resolves to an empty set --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{},"roles":{"empty":{"review":true}}}' > "$TDIR/.orchestrator/config.json"
+out="$(cd "$TDIR" && source "$REG" && registry_role_candidates empty)"
+if [ -z "$out" ]; then
+  ok "object without candidates yields an empty candidate list"
+else
+  fail "object without candidates yields an empty candidate list" "out=$out"
+fi
+teardown
+
+# -- Test: built-in name defaults apply in bare form --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"a":{"harness":"claude","model":"opus"}},"roles":{"worker":"a","reviewer":["a"],"auditor":["a"]}}' > "$TDIR/.orchestrator/config.json"
+cd "$TDIR" && source "$REG"
+if registry_role_is_author worker && ! registry_role_is_review worker \
+   && registry_role_is_review reviewer && ! registry_role_is_author reviewer \
+   && ! registry_role_is_author auditor && ! registry_role_is_review auditor; then
+  ok "bare-form worker=author, reviewer=review, auditor=neither"
+else
+  fail "bare-form worker=author, reviewer=review, auditor=neither"
+fi
+cd / ; teardown
+
+# -- Test: object properties override the name default --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"a":{"harness":"claude","model":"opus"}},"roles":{"worker":{"candidates":["a"],"author":false},"auditor":{"candidates":["a"],"review":true,"author":true}}}' > "$TDIR/.orchestrator/config.json"
+cd "$TDIR" && source "$REG"
+if ! registry_role_is_author worker \
+   && registry_role_is_review auditor && registry_role_is_author auditor; then
+  ok "explicit author:false disables worker default; explicit props enable a custom role"
+else
+  fail "explicit author:false disables worker default; explicit props enable a custom role"
+fi
+cd / ; teardown
 
 echo ""
 echo "Results: ${PASS} passed, ${FAIL} failed"
