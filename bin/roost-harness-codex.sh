@@ -101,6 +101,15 @@ harness_assemble() {
   fi
   RESP_TMUX_ENV+=(-e "CODEX_HOME=${codex_home}")
 
+  # Codex does not wake on MCP notifications, so inbound IRC traffic has to be
+  # injected into the pane as a user turn instead. ROOST_TMUX_TARGET names the
+  # pane; it comes from the session-name side-car bin/roost writes before this
+  # adapter runs, so it is always present by the time we read it here.
+  RESP_TMUX_ENV+=(-e "ROOST_DELIVERY=tmux")
+  if [ -f "${REQ_DATA_DIR}/session-name.txt" ]; then
+    RESP_TMUX_ENV+=(-e "ROOST_TMUX_TARGET=$(cat "${REQ_DATA_DIR}/session-name.txt")")
+  fi
+
   # Same test seam as the Claude adapter: surface the assembled command and the
   # tmux env additions so the golden tests can read them deterministically without
   # a live codex run. Gated on the test-only flag; never written on a real spawn.
