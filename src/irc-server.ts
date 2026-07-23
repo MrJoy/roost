@@ -207,7 +207,7 @@ export function createMcpServer(client: RoostIrcClient, config: ClientConfig, op
   let firstMessageSeen = false
 
   // Inbound delivery mode. Read here rather than at the entrypoint because
-  // this function is where the message handler that consumes them lives —
+  // this function is where the message handler that consumes them lives.
   // createMcpServer is also called directly by tests with a fake client, so
   // the env read has to live in the same closure as the handler it gates.
   const DELIVERY = selectDelivery(process.env['ROOST_DELIVERY'])
@@ -301,9 +301,10 @@ export function createMcpServer(client: RoostIrcClient, config: ClientConfig, op
   }
 
   // Inject an inbound IRC message into the agent's tmux pane as a user turn, for
-  // the tmux delivery mode. Idle-gating and mid-turn buffering follow the Task 3
-  // spike: a message that arrives mid-turn is queued and injected when the pane
-  // returns to idle, so the composer is never corrupted.
+  // the tmux delivery mode. Injections are serialized through a queue: each one
+  // runs to completion before the next starts, so concurrent arrivals never
+  // interleave their pastes. Pane-idle detection is a planned refinement and is
+  // not wired yet.
   const injectQueue: string[] = []
   let injecting = false
   const flushInjectQueue = async () => {
@@ -312,13 +313,23 @@ export function createMcpServer(client: RoostIrcClient, config: ClientConfig, op
     try {
       while (injectQueue.length > 0) {
         const text = injectQueue.shift()!
-        const proc = Bun.spawn(
-          [`${process.env['ROOST_DIR'] ?? '.'}/bin/roost-tmux-inject`, TMUX_TARGET, `roost-irc-${NICK}`],
-          { stdin: 'pipe', stdout: 'ignore', stderr: 'ignore' },
-        )
-        proc.stdin.write(text)
-        await proc.stdin.end()
-        await proc.exited
+        // Isolate each injection. Bun.spawn throws synchronously when the
+        // helper is missing or not executable, and a mid-drain failure must
+        // not reject this loop: an unhandled rejection here would take down the
+        // whole MCP process. Log and move on so one bad paste never kills the
+        // IRC session.
+        try {
+          const proc = Bun.spawn(
+            [`${process.env['ROOST_DIR'] ?? '.'}/bin/roost-tmux-inject`, TMUX_TARGET, `roost-irc-${NICK}`],
+            { stdin: 'pipe', stdout: 'ignore', stderr: 'ignore' },
+          )
+          proc.stdin.write(text)
+          await proc.stdin.end()
+          await proc.exited
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err)
+          process.stderr.write(`roost-irc[${NICK}]: tmux inject failed: ${detail}\n`)
+        }
       }
     } finally {
       injecting = false
