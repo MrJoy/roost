@@ -882,7 +882,7 @@ cmd_spawn() {
       registry_provider_fields "${provider}"; _registry_rc=$?
       # Explicit launch target: no role, so the gate never ran. Audit if this
       # touches a known issue with a recorded author.
-      [ "${_registry_rc}" -eq 0 ] && bypass_audit "${issue_key}" "${RESOLVED_PROVIDER_NAME}" "${RESOLVED_ORG}"
+      [ "${_registry_rc}" -eq 0 ] && bypass_audit "${issue_key}" "${RESOLVED_PROVIDER_NAME}" "${RESOLVED_ORG}" "${RESOLVED_MODEL}" "${RESOLVED_HARNESS}"
     elif registry_role_is_review "${role}"; then
       policy_gate_reviewer "${issue_key}" "${role}" "${allow_same_org}" "${allow_same_org_reason}"
       _registry_rc=$?
@@ -923,7 +923,7 @@ cmd_spawn() {
         source "$(dirname "${ROOST_BIN}")/roost-registry.sh"
         local _audit_org; _audit_org="$(registry_vendor_org "${model}")"
         [ -n "${_audit_org}" ] || _audit_org="unknown"
-        bypass_audit "${issue_key}" "" "${_audit_org}"
+        bypass_audit "${issue_key}" "" "${_audit_org}" "${model}" "${harness}"
       else
         echo "  note: issue ${issue_key} has .orchestrator state but jq is absent; skipping #bypass audit." >&2
       fi

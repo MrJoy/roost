@@ -130,36 +130,40 @@ assignment_record() {
      "$f" > "$tmp" && mv "$tmp" "$f"
 }
 
-# assignment_append <key> <kind> <provider> <org> [reason]
+# assignment_append <key> <kind> <provider> <org> <reason> [model] [harness]
 # Appends a record to the JSON array at .[$key], creating the array if absent.
 # Used for the append-safe audit trails (#override, #bypass) so a second event
-# for the same issue never clobbers the first. Atomic tmp+mv, same discipline
-# as assignment_record.
+# for the same issue never clobbers the first. reason stays positional so the
+# #override caller (5 args) is unaffected; model/harness trail it and default
+# empty, always written as keys. Atomic tmp+mv, same discipline as
+# assignment_record.
 assignment_append() {
-  local key="$1" kind="$2" provider="$3" org="$4" reason="${5:-}"
+  local key="$1" kind="$2" provider="$3" org="$4" reason="${5:-}" model="${6:-}" harness="${7:-}"
   local f; f="$(_assignment_path)"
   mkdir -p "$(dirname "$f")"
   [ -f "$f" ] || printf '{}' > "$f"
   local tmp; tmp="$(mktemp "${f}.XXXXXX")"
-  jq --arg k "$key" --arg kind "$kind" --arg p "$provider" --arg o "$org" --arg reason "$reason" \
-     '.[$k] = ((.[$k] // []) + [{kind:$kind, provider:$p, org:$o, reason:$reason}])' \
+  jq --arg k "$key" --arg kind "$kind" --arg p "$provider" --arg o "$org" \
+     --arg reason "$reason" --arg m "$model" --arg h "$harness" \
+     '.[$k] = ((.[$k] // []) + [{kind:$kind, provider:$p, org:$o, model:$m, harness:$h, reason:$reason}])' \
      "$f" > "$tmp" && mv "$tmp" "$f"
 }
 
-# bypass_audit <issue> <provider> <org>
+# bypass_audit <issue> <provider> <org> <model> <harness>
 # Explicit launch-target spawns (--provider, explicit --model/--harness) carry
 # no role, so the cross-org gate cannot run. When such a spawn targets an issue
-# that already has a recorded author, append a #bypass record and note it, so
-# the un-gated spawn is auditable after the fact. Silent no-op when the issue
-# has no recorded author (nothing to audit against). Assumes jq is present and
-# the cwd is the spawn target. Always returns 0.
+# that already has a recorded author, append a #bypass record naming the launched
+# model and harness, so the un-gated spawn is auditable after the fact. Silent
+# no-op when the issue has no recorded author (nothing to audit against). Assumes
+# jq is present and the cwd is the spawn target. Always returns 0.
 bypass_audit() {
-  local issue="$1" provider="$2" org="$3"
+  local issue="$1" provider="$2" org="$3" model="$4" harness="$5"
   [ -n "$issue" ] || return 0
   [ -f "$(_assignment_path)" ] || return 0
   [ -n "$(assignment_lookup "$issue")" ] || return 0
   echo "  note: explicit launch target for issue ${issue}; cross-org gate not evaluated (no role). Appending #bypass audit record." >&2
-  assignment_append "${issue}#bypass" "explicit-bypass" "$provider" "$org" "explicit launch target; cross-org gate not evaluated"
+  assignment_append "${issue}#bypass" "explicit-bypass" "$provider" "$org" \
+    "explicit launch target; cross-org gate not evaluated" "$model" "$harness"
 }
 
 # assignment_lookup <issue> -> echoes the recorded org, or empty if none.

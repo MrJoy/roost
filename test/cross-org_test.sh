@@ -204,6 +204,34 @@ else
 fi
 teardown
 
+# -- Test: #bypass record carries the launched model and harness (--provider) --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-worker-30 --role worker --issue 30 --cwd "$TDIR" >/dev/null 2>&1 || true
+"${ROOST_BIN}" spawn p-x-30 --provider c2 --issue 30 --cwd "$TDIR" >/dev/null 2>&1 || true
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if jq -e '.["30#bypass"][0].model == "sonnet" and .["30#bypass"][0].harness == "claude"' "$asn" >/dev/null 2>&1; then
+  ok "#bypass (--provider) records launched model + harness"
+else
+  fail "#bypass (--provider) records launched model + harness" "asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test: #bypass record carries the launched model and harness (explicit --model) --
+setup
+mkdir -p "$TDIR/.orchestrator"
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
+"${ROOST_BIN}" spawn p-worker-31 --role worker --issue 31 --cwd "$TDIR" >/dev/null 2>&1 || true
+"${ROOST_BIN}" spawn p-x-31 --model sonnet --issue 31 --cwd "$TDIR" >/dev/null 2>&1 || true
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if jq -e '.["31#bypass"][0].model == "sonnet" and .["31#bypass"][0].harness == "claude"' "$asn" >/dev/null 2>&1; then
+  ok "#bypass (explicit --model) records launched model + harness"
+else
+  fail "#bypass (explicit --model) records launched model + harness" "asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
 # -- Test (NEGATIVE): fully-explicit worker+reviewer leaves no #bypass mark --
 setup
 mkdir -p "$TDIR/.orchestrator"
