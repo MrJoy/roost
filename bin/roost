@@ -1047,9 +1047,18 @@ cmd_spawn() {
   # in RESP_INNER_CMD, and appends any extra tmux -e pairs to RESP_TMUX_ENV.
   # Sourced after harness validation and after ROOST_DATA_DIR / ROOST_SETTINGS
   # are established.
-  # shellcheck source=bin/roost-harness-claude.sh disable=SC1091
-  if ! source "$(dirname "${ROOST_BIN}")/roost-harness-${harness}.sh" 2>/dev/null; then
+  local _adapter; _adapter="$(dirname "${ROOST_BIN}")/roost-harness-${harness}.sh"
+  if [ ! -f "${_adapter}" ]; then
     echo "error: no adapter for harness '${harness}'" >&2
+    return 1
+  fi
+  # Source without 2>/dev/null: a syntax error in the adapter must surface as a
+  # bash parse error, not be misreported as a missing adapter. The missing-file
+  # case is already handled above, so a non-zero here means the file exists but
+  # failed to source.
+  # shellcheck source=bin/roost-harness-claude.sh disable=SC1091
+  if ! source "${_adapter}"; then
+    echo "error: adapter for harness '${harness}' failed to load (see error above)" >&2
     return 1
   fi
   local RESP_INNER_CMD=""

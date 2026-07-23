@@ -10,7 +10,7 @@ PASS=0
 FAIL=0
 
 ok()   { echo "PASS: $1"; PASS=$((PASS+1)); }
-fail() { echo "FAIL: $1 ${2:+— $2}"; FAIL=$((FAIL+1)); }
+fail() { echo "FAIL: $1 ${2:+- $2}"; FAIL=$((FAIL+1)); }
 
 # Write a fake PID file in the same JSON format the daemon uses.
 write_pid_file() {

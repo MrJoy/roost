@@ -10,7 +10,7 @@ FAIL=0
 TDIR=""
 
 ok()   { echo "PASS: $1"; PASS=$((PASS+1)); }
-fail() { echo "FAIL: $1 ${2:+— $2}"; FAIL=$((FAIL+1)); }
+fail() { echo "FAIL: $1 ${2:+- $2}"; FAIL=$((FAIL+1)); }
 
 setup() {
   TDIR="$(mktemp -d /tmp/roost-registry-test-XXXXXXXX)"
@@ -24,23 +24,49 @@ teardown() {
   TDIR=""
 }
 
-# -- Test: --role without jq on PATH errors clearly --
+# Build a PATH that mirrors the real one but excludes jq, so require_jq's
+# `command -v jq` genuinely fails regardless of where jq is installed. Dropping
+# a directory is not enough: in CI jq lives in /usr/bin alongside coreutils, so
+# we symlink every executable EXCEPT jq into a scratch dir and point PATH there.
+# Mirrors the neutralize-PATH technique the signet suite uses for signet-eval.
+make_jqless_path() {
+  local mirror="${TDIR}/.nojq-bin"
+  mkdir -p "$mirror"
+  local d f name
+  IFS=':' read -ra _dirs <<< "$PATH"
+  for d in "${_dirs[@]}"; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      [ -e "$f" ] || continue
+      name="$(basename "$f")"
+      [ "$name" = "jq" ] && continue
+      [ -e "${mirror}/${name}" ] && continue   # first match wins, mirrors PATH order
+      ln -s "$f" "${mirror}/${name}" 2>/dev/null || true
+    done
+  done
+  printf '%s' "$mirror"
+}
+
+# -- Test: --role with jq absent errors clearly, naming jq --
 setup
 mkdir -p "$TDIR/.orchestrator"
 printf '{"project":"p","roles":{"worker":"claude-opus"},"providers":{"claude-opus":{"harness":"claude","model":"opus"}}}' > "$TDIR/.orchestrator/config.json"
-err="$(PATH="/usr/bin:/bin" "${ROOST_BIN}" spawn testnick --role worker --cwd "$TDIR" 2>&1)"; ec=$?
-# When jq is genuinely absent this must name jq. When jq exists in /usr/bin it resolves: accept either the jq error OR a successful resolution banner.
-if { [ "$ec" -ne 0 ] && echo "$err" | grep -qi "jq"; } || echo "$err" | grep -q "harness: claude"; then
-  ok "registry spawn either resolves or errors naming jq"
+nojq="$(make_jqless_path)"
+err="$(PATH="$nojq" "${ROOST_BIN}" spawn testnick --role worker --cwd "$TDIR" 2>&1)"; ec=$?
+# jq is genuinely absent, so the registry path must fail closed and name jq.
+if [ "$ec" -ne 0 ] && echo "$err" | grep -qi "requires jq"; then
+  ok "registry spawn with jq absent errors naming jq"
 else
-  fail "registry spawn either resolves or errors naming jq" "ec=$ec err=$err"
+  fail "registry spawn with jq absent errors naming jq" "ec=$ec err=$err"
 fi
 teardown
 
-# -- Test: bare spawn (no registry) does not require jq --
+# -- Test: bare spawn (no registry) does not require jq even when jq is absent --
 setup
-out="$(PATH="/usr/bin:/bin" "${ROOST_BIN}" spawn testnick --cwd "$TDIR" 2>&1 || true)"
-if ! echo "$out" | grep -qi "jq.*not found\|requires jq"; then
+nojq="$(make_jqless_path)"
+out="$(PATH="$nojq" "${ROOST_BIN}" spawn testnick --cwd "$TDIR" 2>&1 || true)"
+# The bare path never touches the registry, so it must not complain about jq.
+if ! echo "$out" | grep -qi "requires jq\|jq.*not found"; then
   ok "bare spawn does not require jq"
 else
   fail "bare spawn does not require jq" "out=$out"

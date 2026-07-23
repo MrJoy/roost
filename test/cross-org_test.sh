@@ -10,7 +10,7 @@ FAIL=0
 TDIR=""
 
 ok()   { echo "PASS: $1"; PASS=$((PASS+1)); }
-fail() { echo "FAIL: $1 ${2:+— $2}"; FAIL=$((FAIL+1)); }
+fail() { echo "FAIL: $1 ${2:+- $2}"; FAIL=$((FAIL+1)); }
 
 setup() {
   TDIR="$(mktemp -d /tmp/roost-crossorg-test-XXXXXXXX)"
@@ -104,11 +104,16 @@ mkdir -p "$TDIR/.orchestrator"
 printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"},"c2":{"harness":"claude","model":"sonnet"}},"roles":{"worker":"c1","reviewer":["c2"]}}' > "$TDIR/.orchestrator/config.json"
 "${ROOST_BIN}" spawn p-worker-9 --role worker --issue 9 --cwd "$TDIR" >/dev/null 2>&1 || true
 out="$("${ROOST_BIN}" spawn p-reviewer-9 --role reviewer --issue 9 --allow-same-org "only reviewer available" --cwd "$TDIR" 2>&1 || true)"
+asn="$TDIR/.orchestrator/provider-assignments.json"
+# The override is recorded under a distinct "9#override" key, and the worker's
+# author entry at "9" must survive it (provider c1, org anthropic, override
+# false) so a later re-review still reads the real author, not this reviewer.
 if echo "$out" | grep -qi "override" \
-    && jq -e '.["9"].override == true and .["9"].reason == "only reviewer available"' "$TDIR/.orchestrator/provider-assignments.json" >/dev/null; then
-  ok "--allow-same-org proceeds and records override + reason"
+    && jq -e '.["9#override"].override == true and .["9#override"].reason == "only reviewer available"' "$asn" >/dev/null \
+    && jq -e '.["9"].role == "worker" and .["9"].provider == "c1" and .["9"].override == false' "$asn" >/dev/null; then
+  ok "--allow-same-org records override under a distinct key; worker author survives"
 else
-  fail "--allow-same-org proceeds and records override + reason" "out=$out asn=$(cat "$TDIR/.orchestrator/provider-assignments.json" 2>/dev/null)"
+  fail "--allow-same-org records override under a distinct key; worker author survives" "out=$out asn=$(cat "$asn" 2>/dev/null)"
 fi
 teardown
 
