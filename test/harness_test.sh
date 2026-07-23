@@ -29,16 +29,16 @@ else
 fi
 teardown
 
-# -- Test: codex harness fails fast with a spec pointer --
+# -- Test: codex harness assembles a codex invocation --
 setup
-err="$("${ROOST_BIN}" spawn testnick --harness codex --cwd "$TDIR" 2>&1)"; ec=$?
-if [ "$ec" -ne 0 ] \
-    && echo "$err" | grep -q "codex harness not yet implemented" \
-    && echo "$err" | grep -q "docs/superpowers/specs"; then
-  ok "codex harness fails fast with follow-on spec pointer"
+out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 "${ROOST_BIN}" spawn testnick --harness codex --model gpt-5.1-codex --cwd "$TDIR" --prompt hi 2>&1 || true)"
+data_dir="$(echo "$out" | sed -n 's/.*data dir (preflight): //p' | head -1)"
+inner="$(cat "$data_dir/inner-cmd.txt" 2>/dev/null)"
+if echo "$inner" | grep -q '^codex ' && echo "$inner" | grep -q -- '--dangerously-bypass-hook-trust'; then
+  ok "codex harness assembles a codex invocation"
 else
-  fail "codex harness fails fast with follow-on spec pointer" "ec=$ec err=$err"
+  fail "codex harness assembles a codex invocation" "inner=$inner"
 fi
-teardown
+[ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
 
 echo ""; echo "Results: ${PASS} passed, ${FAIL} failed"; [ "$FAIL" -eq 0 ]
