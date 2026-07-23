@@ -111,13 +111,13 @@ On confirmation, for each issue N:
      --issue <N> \
      --prompt 'issue=<N> milestone=<milestone> human=<human-nick> gh-login=<gh-login>'
    ```
-   (`--role worker` records the issue's author org and the worker's model/effort stay the PM's per-issue call, layered on via R1. `--agent reviewer` keeps the reviewer persona and its `permissionMode`; `--role reviewer` runs the cross-org gate and selects the reviewer's provider, layered on via R2. `reviewer.md`'s frontmatter pins model + effort, so in a single-org registry the reviewer launch is unchanged. The reviewer shares the worker's worktree via `--cwd` — it reads the branch there but never edits.) If the PM named a cross-issue contract for this issue, append it to the reviewer's prompt after the required tokens (e.g. `... gh-login=<gh-login> consumes-contract-from=#<M>`) so it reviews with that lens.
+   (`--role worker` records the issue's author org, and the worker's model/effort stay the PM's per-issue call. `--agent reviewer` keeps the reviewer persona and its `permissionMode`; `--role reviewer` runs the cross-org gate and selects the reviewer's provider. `reviewer.md`'s frontmatter pins model + effort, so in a single-org registry the reviewer launch is unchanged. The reviewer shares the worker's worktree via `--cwd`. It reads the branch there but never edits.) If the PM named a cross-issue contract for this issue, append it to the reviewer's prompt after the required tokens (e.g. `... gh-login=<gh-login> consumes-contract-from=#<M>`) so it reviews with that lens.
 
    `roost init` seeds a `claude-default` provider and `worker`/`reviewer`
    roles, so the `--role` templates above resolve to today's Claude default
    in a fresh project. To run a worker or reviewer on a non-Claude harness,
-   add that provider to `.orchestrator/config.json` and add it as a reviewer
-   candidate. A role can declare `"author": true` or `"review": true`; the
+   add that provider to `.orchestrator/config.json` and list it in that
+   role's candidates. A role can declare `"author": true` or `"review": true`; the
    built-in names `worker` and `reviewer` default to those respectively.
    Spawning a review role through the registry runs a cross-org gate that
    can hard-fail the spawn.
