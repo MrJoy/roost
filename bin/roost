@@ -292,11 +292,13 @@ Agent class guidance:
   worth thinking about — claude-code's native cache behavior applies.
 
 Provider selection:
-  Provider resolution order: explicit --harness, --model, or --agent
-  always wins and skips the registry entirely. --provider resolves that
-  named provider directly. --role resolves through the roles map in
-  .orchestrator/config.json. No --provider and no --role means no
-  registry: today's behavior, claude harness with the opus default.
+  --agent always wins and skips the registry entirely. --provider resolves
+  that named provider directly. --role resolves through the roles map in
+  .orchestrator/config.json, still recording authorship and running the
+  cross-org gate even when an explicit --model/--harness overrides the
+  resolved launch target (the override must share the role's vendor org).
+  No --provider and no --role means no registry: today's behavior, claude
+  harness with the opus default.
 
   Cross-org rule: a review role's provider org must differ from the recorded author org.
   Roles are declared in .orchestrator/config.json .roles. A role
@@ -838,12 +840,12 @@ cmd_spawn() {
   if [ -z "${issue_key}" ]; then
     issue_key="$(printf '%s' "${channels}" | grep -oE '#[a-zA-Z0-9_-]+-issue-[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)"
   fi
-  # Registry resolution only runs when --provider/--role select it, and only
-  # when no explicit --harness/--model already pinned the launch target (those
-  # win outright and skip the registry read entirely). require_jq is called
-  # here, not unconditionally, so a bare spawn never needs jq on PATH.
-  if [ "${model_explicit}" -eq 0 ] && [ "${harness_explicit}" -eq 0 ] && [ -z "${agent}" ] \
-      && { [ -n "${provider}" ] || [ -n "${role}" ]; }; then
+  # Registry resolution runs whenever --provider/--role select it. An explicit
+  # --harness/--model still wins over the resolved value (see the assignment
+  # below), but --role always resolves first so author-recording and the gate
+  # run even under an override. require_jq is called here, not unconditionally,
+  # so a bare spawn never needs jq on PATH.
+  if [ -z "${agent}" ] && { [ -n "${provider}" ] || [ -n "${role}" ]; }; then
     require_jq || return 1
     # shellcheck source=bin/roost-registry.sh disable=SC1091
     source "$(dirname "${ROOST_BIN}")/roost-registry.sh"
@@ -901,20 +903,36 @@ cmd_spawn() {
     fi
     cd "${_registry_prev_pwd}" || return 1
     [ "${_registry_rc}" -eq 0 ] || return 1
-    harness="${RESOLVED_HARNESS}"
-    model="${RESOLVED_MODEL}"
+    # Model selection precedence: explicit --harness/--model win over the role's
+    # resolved values, but the role still drove author-recording and the gate
+    # above. Only adopt the resolved value when the operator did not pin one.
+    [ "${harness_explicit}" -eq 0 ] && harness="${RESOLVED_HARNESS}"
+    [ "${model_explicit}" -eq 0 ] && model="${RESOLVED_MODEL}"
+    # Org-coherence: an explicit --model on a --role spawn must be from the same
+    # vendor org the role resolved to. Picking a role from one org and a model
+    # from another is incoherent. In a single-org deployment the vendor orgs
+    # always match, so this never triggers there.
+    if [ "${model_explicit}" -eq 1 ] && [ -n "${role}" ]; then
+      local _override_org; _override_org="$(registry_vendor_org "${model}")"
+      if [ -n "${_override_org}" ] && [ "${_override_org}" != "${RESOLVED_ORG}" ]; then
+        cd "${_registry_prev_pwd}" || return 1
+        echo "error: --model '${model}' (org '${_override_org}') differs from role '${role}' org '${RESOLVED_ORG}'. Pick a model from the role's org, or drop --role." >&2
+        return 1
+      fi
+    fi
     # base_url_env / auth_env / org are consumed by later provider-wiring work.
   fi
   if [ -z "${model}" ] && [ -z "${agent}" ]; then
     model="opus"
   fi
-  # Bypass audit for explicit --model/--harness (the --provider path is audited
-  # inside the registry block). These flags skip the registry entirely, so this
-  # engages jq only when .orchestrator/provider-assignments.json already exists,
-  # preserving the "a bare spawn never needs jq" invariant. --agent is excluded:
-  # its model comes from the agent frontmatter, a separate path.
+  # Bypass audit for explicit --model/--harness with neither --provider nor
+  # --role set (those two are audited, or org-gated, inside the registry block
+  # above). This engages jq only when .orchestrator/provider-assignments.json
+  # already exists, preserving the "a bare spawn never needs jq" invariant.
+  # --agent is excluded: its model comes from the agent frontmatter, a
+  # separate path.
   if { [ "${model_explicit}" -eq 1 ] || [ "${harness_explicit}" -eq 1 ]; } \
-      && [ -z "${provider}" ] && [ -z "${agent}" ] && [ -n "${issue_key}" ]; then
+      && [ -z "${provider}" ] && [ -z "${role}" ] && [ -z "${agent}" ] && [ -n "${issue_key}" ]; then
     local _audit_prev_pwd; _audit_prev_pwd="$(pwd)"
     cd "${cwd}" || return 1
     if [ -f ".orchestrator/provider-assignments.json" ]; then

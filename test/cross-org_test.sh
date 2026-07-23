@@ -43,6 +43,8 @@ teardown() {
   tmux kill-session -t "roost-p-x-32b" 2>/dev/null || true
   tmux kill-session -t "roost-p-x-33" 2>/dev/null || true
   tmux kill-session -t "roost-p-both-40" 2>/dev/null || true
+  tmux kill-session -t "roost-p-worker-50" 2>/dev/null || true
+  tmux kill-session -t "roost-p-worker-51" 2>/dev/null || true
   trap - EXIT
   TDIR=""
 }
@@ -59,6 +61,36 @@ if [ -f "$TDIR/.orchestrator/provider-assignments.json" ] \
   ok "worker spawn records author-org openai for issue 42"
 else
   fail "worker spawn records author-org openai for issue 42" "$(cat "$TDIR/.orchestrator/provider-assignments.json" 2>/dev/null)"
+fi
+teardown
+
+# -- Test (R1): --role worker --model <override> records authorship AND runs on the override model --
+setup
+mkdir -p "$TDIR/.orchestrator"
+# Single-org registry: worker role resolves anthropic; override --model sonnet is
+# also anthropic, so the org-coherence check passes. Authorship is still recorded.
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
+out="$("${ROOST_BIN}" spawn p-worker-50 --role worker --model sonnet --issue 50 --cwd "$TDIR" 2>&1 || true)"
+asn="$TDIR/.orchestrator/provider-assignments.json"
+if echo "$out" | grep -q "model: sonnet" \
+    && jq -e '.["50"].org == "anthropic" and .["50"].role == "worker"' "$asn" >/dev/null 2>&1; then
+  ok "R1: --role worker --model sonnet records author AND launches sonnet"
+else
+  fail "R1: --role worker --model sonnet records author AND launches sonnet" "out=$out asn=$(cat "$asn" 2>/dev/null)"
+fi
+teardown
+
+# -- Test (R1): a cross-org override model errors --
+setup
+mkdir -p "$TDIR/.orchestrator"
+# worker role resolves anthropic (c1=opus). Override --model gpt-5.1-codex is
+# openai. Picking an anthropic role and an openai model is incoherent -> error.
+printf '{"project":"p","providers":{"c1":{"harness":"claude","model":"opus"}},"roles":{"worker":"c1"}}' > "$TDIR/.orchestrator/config.json"
+err="$("${ROOST_BIN}" spawn p-worker-51 --role worker --model gpt-5.1-codex --issue 51 --cwd "$TDIR" 2>&1)"; ec=$?
+if [ "$ec" -ne 0 ] && echo "$err" | grep -qi "differs from role" && echo "$err" | grep -q "openai"; then
+  ok "R1: cross-org override model errors"
+else
+  fail "R1: cross-org override model errors" "ec=$ec err=$err"
 fi
 teardown
 
