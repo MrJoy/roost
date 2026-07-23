@@ -29,6 +29,25 @@ harness_assemble() {
     fi
   fi
 
+  # Policy hook chain. signet-eval decides first when .signet/ is active
+  # (deterministic, LLM-free), ordered ahead of the IRC permbot relay on both
+  # PermissionRequest and PreToolUse. Both scripts already emit the
+  # permissionDecision / permissionDecisionReason wire Codex consumes, so no
+  # hook-script rewrite is needed; the adapter wires the TOML.
+  local hooks_block=""
+  if [ "${REQ_SIGNET_ACTIVE}" -eq 1 ]; then
+    hooks_block="${hooks_block}"$'\n'"[[hooks.PermissionRequest]]"$'\n'"command = \"signet-eval --permissionrequest\""$'\n'
+  fi
+  if [ "${REQ_PERM_IRC}" -eq 1 ]; then
+    hooks_block="${hooks_block}"$'\n'"[[hooks.PermissionRequest]]"$'\n'"command = \"${REQ_ROOST_BIN} hook-exec irc-permission-prompt\""$'\n'
+  fi
+  if [ "${REQ_SIGNET_ACTIVE}" -eq 1 ]; then
+    hooks_block="${hooks_block}"$'\n'"[[hooks.PreToolUse]]"$'\n'"matcher = \"Bash\""$'\n'"command = \"signet-eval --pretooluse\""$'\n'
+  fi
+  if [ "${REQ_PERM_IRC}" -eq 1 ]; then
+    hooks_block="${hooks_block}"$'\n'"[[hooks.PreToolUse]]"$'\n'"matcher = \"Bash\""$'\n'"command = \"${REQ_ROOST_BIN} hook-exec irc-pretooluse-prompt\""$'\n'
+  fi
+
   # The roost-irc MCP stdio server. It launches from the resolved plugin tree and
   # inherits the ROOST_IRC_* identity env from the tmux pane (bin/roost sets those
   # via tmux -e), the same way the Claude path's MCP does. So no env is duplicated
@@ -40,6 +59,7 @@ harness_assemble() {
     printf 'command = "%s/bin/roost-irc-server"\n' "${REQ_ROOST_DIR}"
     printf 'args = []\n'
     [ -n "${provider_block}" ] && printf '%s' "${provider_block}"
+    [ -n "${hooks_block}" ] && printf '%s' "${hooks_block}"
   } > "${config_toml}"
 
   # IRC-trust preamble. roost's security model treats joined-channel traffic as

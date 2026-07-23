@@ -45,4 +45,55 @@ else
 fi
 [ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
 
+# -- Test: --perm-irc wires PermissionRequest + PreToolUse permbot hook blocks --
+setup
+out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 "${ROOST_BIN}" spawn testnick --harness codex --model gpt-5.1-codex --perm-irc --perm-target op --cwd "$TDIR" --prompt hi 2>&1 || true)"
+data_dir="$(echo "$out" | sed -n 's/.*data dir (preflight): //p' | head -1)"
+cfg="$data_dir/codex-home/config.toml"
+if grep -qF '[[hooks.PermissionRequest]]' "$cfg" 2>/dev/null \
+    && grep -qF 'hook-exec irc-permission-prompt' "$cfg" 2>/dev/null \
+    && grep -qF '[[hooks.PreToolUse]]' "$cfg" 2>/dev/null \
+    && grep -qF 'hook-exec irc-pretooluse-prompt' "$cfg" 2>/dev/null; then
+  ok "codex --perm-irc wires permbot PermissionRequest + PreToolUse blocks"
+else
+  fail "codex --perm-irc wires permbot PermissionRequest + PreToolUse blocks" "cfg=$(cat "$cfg" 2>/dev/null)"
+fi
+[ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
+
+# -- Test: .signet/ present wires signet AHEAD of the permbot relay on both surfaces --
+setup
+mkdir -p "$TDIR/.signet" "$TDIR/.stubs"
+cat > "$TDIR/.stubs/signet-eval" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TDIR/.stubs/signet-eval"
+out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 PATH="$TDIR/.stubs:$PATH" "${ROOST_BIN}" spawn testnick --harness codex --model gpt-5.1-codex --perm-irc --perm-target op --cwd "$TDIR" --prompt hi 2>&1 || true)"
+data_dir="$(echo "$out" | sed -n 's/.*data dir (preflight): //p' | head -1)"
+cfg="$data_dir/codex-home/config.toml"
+# signet-eval must appear before the irc relay in both PermissionRequest and PreToolUse.
+pr_sig="$(grep -n 'signet-eval --permissionrequest' "$cfg" 2>/dev/null | head -1 | cut -d: -f1)"
+pr_irc="$(grep -n 'hook-exec irc-permission-prompt' "$cfg" 2>/dev/null | head -1 | cut -d: -f1)"
+ptu_sig="$(grep -n 'signet-eval --pretooluse' "$cfg" 2>/dev/null | head -1 | cut -d: -f1)"
+ptu_irc="$(grep -n 'hook-exec irc-pretooluse-prompt' "$cfg" 2>/dev/null | head -1 | cut -d: -f1)"
+if [ -n "$pr_sig" ] && [ -n "$pr_irc" ] && [ "$pr_sig" -lt "$pr_irc" ] \
+    && [ -n "$ptu_sig" ] && [ -n "$ptu_irc" ] && [ "$ptu_sig" -lt "$ptu_irc" ]; then
+  ok "codex signet precedes irc relay on both PermissionRequest and PreToolUse"
+else
+  fail "codex signet precedes irc relay on both PermissionRequest and PreToolUse" "cfg=$(cat "$cfg" 2>/dev/null)"
+fi
+[ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
+
+# -- Test: no .signet/ -> no signet hook in the codex config --
+setup
+out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 "${ROOST_BIN}" spawn testnick --harness codex --model gpt-5.1-codex --perm-irc --perm-target op --cwd "$TDIR" --prompt hi 2>&1 || true)"
+data_dir="$(echo "$out" | sed -n 's/.*data dir (preflight): //p' | head -1)"
+cfg="$data_dir/codex-home/config.toml"
+if ! grep -qF 'signet-eval' "$cfg" 2>/dev/null; then
+  ok "codex no .signet/: no signet hook wired"
+else
+  fail "codex no .signet/: no signet hook wired" "cfg=$(cat "$cfg" 2>/dev/null)"
+fi
+[ -n "$data_dir" ] && rm -rf "$data_dir"; teardown
+
 echo ""; echo "Results: ${PASS} passed, ${FAIL} failed"; [ "$FAIL" -eq 0 ]
