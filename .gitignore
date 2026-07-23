@@ -33,3 +33,4 @@ CLAUDE.local.md
 # Python bytecode cache
 __pycache__/
 *.pyc
+.env.claudebox
