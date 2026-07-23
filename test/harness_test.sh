@@ -30,8 +30,9 @@ fi
 teardown
 
 # -- Test: codex harness assembles a codex invocation --
+# --perm-irc satisfies the fail-closed gate so the spawn is not refused.
 setup
-out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 "${ROOST_BIN}" spawn testnick --harness codex --model gpt-5.1-codex --cwd "$TDIR" --prompt hi 2>&1 || true)"
+out="$(ROOST_SPAWN_KEEP_DATA_DIR=1 "${ROOST_BIN}" spawn testnick --harness codex --model gpt-5.1-codex --perm-irc --perm-target op --cwd "$TDIR" --prompt hi 2>&1 || true)"
 data_dir="$(echo "$out" | sed -n 's/.*data dir (preflight): //p' | head -1)"
 inner="$(cat "$data_dir/inner-cmd.txt" 2>/dev/null)"
 if echo "$inner" | grep -q '^codex ' && echo "$inner" | grep -q -- '--dangerously-bypass-hook-trust'; then
